@@ -167,12 +167,12 @@ test('a PDF that is not an export produces a clear warning', () => {
   assert.match(warnings[0], /news\.pdf: no questions found/);
 });
 
-// ---- real exports, if any are present locally (samples/ is never committed) ----
+// ---- real exports, if any are present locally (exports/ is never committed) ----
 
-const samplesDir = fileURLToPath(new URL('../samples/', import.meta.url));
+const samplesDir = fileURLToPath(new URL('../exports/', import.meta.url));
 const samples = existsSync(samplesDir) ? readdirSync(samplesDir).filter(f => f.toLowerCase().endsWith('.pdf')) : [];
 
-test('parses the local sample exports cleanly', { skip: samples.length ? false : 'no exports in samples/' }, async t => {
+test('parses the local exports cleanly', { skip: samples.length ? false : 'no PDFs in exports/' }, async t => {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   for (const file of samples) {
     const loading = pdfjs.getDocument({ data: new Uint8Array(readFileSync(join(samplesDir, file))), verbosity: 0 });

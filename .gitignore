@@ -1,7 +1,5 @@
-# College Board content must never be committed: exports and anything parsed from them stay local.
 *.pdf
-samples/
-imports/
+exports/
+data/
 node_modules/
-dist/
 .DS_Store

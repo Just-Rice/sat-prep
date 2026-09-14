@@ -17,6 +17,7 @@ const MISTAKE_REASONS = ['Careless slip', "Didn't know the concept", 'Misread th
 let progress = store.loadProgress();
 let pool = [];
 let byId = new Map();
+let library = { source: 'demo', files: 0, warnings: [] };
 let session = null;   // the active placement, practice, review or test session
 let ticker = null;
 
@@ -30,11 +31,6 @@ const on = (sel, event, fn) => view.querySelectorAll(sel).forEach(el => el.addEv
 const save = () => store.saveProgress(progress);
 const dayKey = t => new Date(t).toLocaleDateString('en-CA');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-async function loadPool() {
-  pool = await store.questions.all();
-  byId = new Map(pool.map(q => [q.id, q]));
-}
 
 function go(path) {
   if (location.hash === `#/${path}`) render();
@@ -92,16 +88,10 @@ function snippet(q) {
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
 
-// Imported questions keep math, graphs and tables as images cut from the export (see importer.js).
-const imageUrls = new WeakMap();
+// Questions built from exports keep math, graphs and tables as images (see scripts/build-questions.js).
 function imgHtml(image, alt) {
-  if (!image?.blob) return '';
-  let url = imageUrls.get(image.blob);
-  if (!url) {
-    url = URL.createObjectURL(image.blob);
-    imageUrls.set(image.blob, url);
-  }
-  return `<img class="qimg" src="${url}" alt="${esc(alt)}" width="${image.width}" height="${image.height}">`;
+  if (!image?.src) return '';
+  return `<img class="qimg" src="${esc(image.src)}" alt="${esc(alt)}" width="${image.width}" height="${image.height}" loading="lazy">`;
 }
 
 // A typed-in answer drawn as math in the export can't be checked automatically; the student compares
@@ -318,7 +308,7 @@ function viewStart() {
         </div>
       </div>
     </div>
-    ${small ? `<p class="note">Your library has ${sectionCount('RW')} Reading and Writing and ${sectionCount('MATH')} Math questions. Placement results get more reliable as you import more.</p>` : ''}`;
+    ${small ? `<p class="note">Your library has ${sectionCount('RW')} Reading and Writing and ${sectionCount('MATH')} Math questions. Placement results get more reliable as you add more exports.</p>` : ''}`;
   on('#placement', 'click', () => {
     progress.profile.mode = 'placement';
     progress.placement = { RW: null, MATH: null };
@@ -422,7 +412,7 @@ function viewPractice(arg) {
       <span class="tally">${session.correct}/${session.done} this session · ${answeredToday()}/${progress.plan.dailyGoal} today</span>
     </header>`;
   if (!session.q) {
-    view.innerHTML = `${header}<div class="empty"><h2>No questions available</h2><p>Import ${SECTIONS[section].name} questions in the Library${progress.profile.mode === 'grade' ? ', or take the placement test to unlock skills beyond your grade' : ''}.</p><a class="button primary" href="#/library">Open Library</a></div>`;
+    view.innerHTML = `${header}<div class="empty"><h2>No questions available</h2><p>Add ${SECTIONS[section].name} exports to the <code>exports</code> folder and restart the app${progress.profile.mode === 'grade' ? ', or take the placement test to unlock skills beyond your grade' : ''}.</p><a class="button primary" href="#/library">Open Library</a></div>`;
   } else {
     renderDrill(header, 'practice', () => viewPractice(section));
   }
@@ -495,7 +485,7 @@ function viewTest() {
       ${[['FULL', 'Full test', 'Reading and Writing, then Math', '2 hr 14 min'], ['RW', 'Reading and Writing', 'Two modules', '64 min'], ['MATH', 'Math', 'Two modules', '70 min']].map(([k, title, sub, time]) => `
         <div class="card"><h2>${title}</h2><p class="muted">${sub} · ${time}</p><button class="primary" data-test="${k}">Start</button></div>`).join('')}
     </div>
-    ${sectionCount('RW') < sizes.RW || sectionCount('MATH') < sizes.MATH ? `<p class="note">A full-length section needs ${sizes.RW} Reading and Writing or ${sizes.MATH} Math questions. You have ${sectionCount('RW')} and ${sectionCount('MATH')}, so modules will be shorter until you import more.</p>` : ''}
+    ${sectionCount('RW') < sizes.RW || sectionCount('MATH') < sizes.MATH ? `<p class="note">A full-length section needs ${sizes.RW} Reading and Writing or ${sizes.MATH} Math questions. You have ${sectionCount('RW')} and ${sectionCount('MATH')}, so modules will be shorter until you add more exports.</p>` : ''}
     ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table>
       <thead><tr><th>Date</th><th>Test</th><th>Reading and Writing</th><th>Math</th></tr></thead>
       <tbody>${[...progress.tests].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td>${esc(t.kind)}</td>
@@ -936,39 +926,24 @@ function viewPlan() {
 // ---------- library & settings ----------
 
 function viewLibrary() {
-  const demoCount = pool.filter(q => q.source === 'demo').length;
-  const officialCount = pool.length - demoCount;
   const rows = DOMAINS.map(d => {
     const qs = pool.filter(q => q.domain === d.name);
     const n = level => qs.filter(q => q.difficulty === level).length;
     return `<tr><td>${SECTIONS[d.section].short}</td><td>${esc(d.name)}</td><td class="num">${n('Easy')}</td><td class="num">${n('Medium')}</td><td class="num">${n('Hard')}</td><td class="num"><strong>${qs.length}</strong></td></tr>`;
   }).join('');
+  const addMore = 'save College Board Question Bank PDF exports in the <code>exports</code> folder and restart the app';
 
   view.innerHTML = `
     <h1>Question library</h1>
-    ${!pool.length ? '<p class="note">Import College Board exports to get started, or load the demo questions to try the app first.</p>' : ''}
-    <div class="card">
-      <h2>Import College Board exports</h2>
-      <ol class="steps">
-        <li>Open the <a href="https://satsuiteeducatorquestionbank.collegeboard.org/" target="_blank" rel="noopener">SAT Suite Educator Question Bank</a>.</li>
-        <li>Filter by test, domain, skill or difficulty and select questions.</li>
-        <li>Export them to PDF, with answers and explanations if offered.</li>
-        <li>Choose the PDFs here. They're read in this browser and stored only on this device.</li>
-      </ol>
-      <input type="file" id="files" accept="application/pdf" multiple>
-      <div id="import-status" class="status"></div>
-    </div>
+    ${library.source === 'demo'
+      ? `<p class="note">No College Board questions are built in yet, so ${plural(pool.length, 'demo question')} are in use. To add real ones, ${addMore}.</p>`
+      : `<p class="muted">${plural(pool.length, 'question')} from ${plural(library.files, 'export')}. To add more, ${addMore}.</p>`}
+    ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card" style="margin-top:1rem">
-      <h2>Library contents</h2>
-      <p class="muted">${plural(officialCount, 'imported question')} · ${plural(demoCount, 'demo question')}</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Section</th><th>Domain</th><th class="num">Easy</th><th class="num">Medium</th><th class="num">Hard</th><th class="num">Total</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <div class="actions">
-        ${demoCount ? '<button id="remove-demo">Remove demo questions</button>' : '<button id="load-demo">Load demo questions</button>'}
-        ${officialCount ? '<button class="danger" id="clear-imported">Delete imported questions</button>' : ''}
-      </div>
     </div>
     <div class="card" style="margin-top:1rem">
       <h2>Settings</h2>
@@ -980,42 +955,6 @@ function viewLibrary() {
       <div class="actions"><button class="danger" id="reset">Reset all progress</button></div>
     </div>`;
 
-  on('#files', 'change', async e => {
-    const status = $('#import-status');
-    const files = [...e.target.files];
-    if (!files.length) return;
-    status.textContent = 'Loading the PDF reader…';
-    const found = [];
-    const warnings = [];
-    try {
-      const { importPdf } = await import('./importer.js');
-      for (const file of files) {
-        status.textContent = `Reading ${file.name}…`;
-        try {
-          const result = await importPdf(file, message => { status.textContent = message; });
-          found.push(...result.questions);
-          warnings.push(...result.warnings);
-        } catch (err) {
-          warnings.push(`${file.name}: ${err.message}`);
-        }
-      }
-      if (found.length) await store.questions.putMany(found);
-    } catch (err) {
-      warnings.push(`The PDF reader failed to load: ${err.message}`);
-    }
-    await loadPool();
-    viewLibrary();
-    renderNav('library');
-    $('#import-status').innerHTML = `<p>Imported ${plural(found.length, 'question')}.</p>${warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
-      ${found.length && !progress.profile.mode ? '<p><a class="button primary" href="#/start">Next: find your level</a></p>' : ''}`;
-  });
-  on('#load-demo', 'click', async () => {
-    await store.questions.putMany(DEMO_QUESTIONS);
-    await loadPool();
-    if (progress.profile.mode) render(); else go('start');
-  });
-  on('#remove-demo', 'click', async () => replacePool(pool.filter(q => q.source !== 'demo')));
-  confirmButton('#clear-imported', 'Click again to delete', () => replacePool(pool.filter(q => q.source === 'demo')));
   on('#desmos-form', 'submit', e => {
     e.preventDefault();
     setDesmosKey(new FormData(e.currentTarget).get('key'));
@@ -1029,17 +968,29 @@ function viewLibrary() {
   });
 }
 
-async function replacePool(keep) {
-  await store.questions.clear();
-  if (keep.length) await store.questions.putMany(keep);
-  await loadPool();
-  session = null;
-  render();
-}
-
 // ---------- boot ----------
 
+// The server builds data/questions.json from exports/ at startup; without it the demo questions are used.
+async function loadLibrary() {
+  try {
+    const res = await fetch('data/questions.json', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.questions.length) return { source: 'exports', questions: data.questions, files: data.files, warnings: data.warnings };
+    }
+  } catch {
+    // No built library yet.
+  }
+  return { source: 'demo', questions: DEMO_QUESTIONS, files: 0, warnings: [] };
+}
+
+// Earlier versions imported questions into IndexedDB in the browser; that copy is no longer used.
+try { indexedDB.deleteDatabase('sat-prep'); } catch { /* storage unavailable */ }
+
 window.addEventListener('hashchange', render);
-loadPool().then(render).catch(err => {
-  view.innerHTML = `<div class="empty"><h2>Local storage is unavailable</h2><p>${esc(err.message)}</p></div>`;
+loadLibrary().then(result => {
+  library = result;
+  pool = result.questions;
+  byId = new Map(pool.map(q => [q.id, q]));
+  render();
 });

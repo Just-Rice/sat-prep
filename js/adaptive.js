@@ -6,7 +6,7 @@
 //     choices: [{ letter, text } | { letter, image }] | null,
 //     answer: 'B' | ['3/4', '.75'] | null (typed-in answer only available as answerImage),
 //     rationale? or rationaleImage?, original? }
-// Text fields are plain text; the UI escapes them. Images are { blob, width, height }.
+// Text fields are plain text; the UI escapes them. Images are { src, width, height }.
 
 import { DIFFICULTY_B, estimateAbility, targetDifficulty } from './irt.js';
 import { GRADE_PRIOR, skillsForGrade, skillsForSection } from './taxonomy.js';

@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "build": "node scripts/build-questions.js"
   },
   "repository": {
     "type": "git",
@@ -13,6 +14,7 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "pdfjs-dist": "^6.3.289"
   },
   "private": true

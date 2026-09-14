@@ -178,3 +178,4 @@ details.review-item .question { border: 0; border-top: 1px solid var(--border); 
 .sci-row { display: flex; justify-content: space-between; align-items: center; margin: 0.5rem 0; }
 .sci-history { list-style: none; padding: 0; margin: 0.4rem 0; font-family: ui-monospace, monospace; font-size: 0.85rem; max-height: 220px; overflow-y: auto; overflow-wrap: anywhere; }
 .hint { font-size: 0.8rem; color: var(--muted); }
+code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--subtle); padding: 0 0.3em; border-radius: 4px; }
