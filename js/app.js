@@ -1040,8 +1040,12 @@ function viewResources() {
     <div class="cards">${RESOURCES.map(group => `
       <section class="card">
         <h2>${esc(group.title)}</h2>
-        <ul class="links">${group.links.map(([title, url, about]) => `
-          <li><a href="${esc(url)}" target="_blank" rel="noopener">${esc(title)} <span aria-hidden="true">↗</span></a><span class="hint">${esc(about)}</span></li>`).join('')}
+        <ul class="links">${group.links.map(([title, url, about]) => {
+          // The last word and the arrow wrap together, so the arrow never sits alone on a line.
+          const cut = title.lastIndexOf(' ') + 1;
+          return `
+          <li><a href="${esc(url)}" target="_blank" rel="noopener">${esc(title.slice(0, cut))}<span class="nowrap">${esc(title.slice(cut))}&nbsp;<span aria-hidden="true">↗</span></span></a><span class="hint">${esc(about)}</span></li>`;
+        }).join('')}
         </ul>
       </section>`).join('')}
     </div>`;
