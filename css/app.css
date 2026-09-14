@@ -142,6 +142,10 @@ td.num, th.num { text-align: right; }
 .empty { text-align: center; padding: 3rem 1rem; }
 .steps { padding-left: 1.2rem; }
 .status p { margin: 0.3rem 0; }
+.links { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.8rem; }
+.links li { display: flex; flex-direction: column; gap: 0.1rem; }
+.links a { font-weight: 600; text-decoration: none; }
+.links a:hover { text-decoration: underline; }
 
 /* Timed test */
 .test-bar { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem 0.9rem; margin-bottom: 0.9rem; position: sticky; top: 3.4rem; z-index: 5; }

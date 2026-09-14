@@ -76,6 +76,12 @@ export function fromCloud(main, chunks) {
   };
 }
 
+// docs: Map of cloud path → JSON (null for a document that doesn't exist).
+export function progressFromDocs(docs) {
+  const chunks = Object.fromEntries([...docs].filter(([path, json]) => path !== 'main' && json != null));
+  return fromCloud(docs.get('main') ?? null, chunks);
+}
+
 // Syncs local progress with the cloud and returns the merged result, which the caller saves locally.
 //
 // backend: { readAll() -> { main, chunks }, transact(fn) } where fn receives { get(path), set(path, json),

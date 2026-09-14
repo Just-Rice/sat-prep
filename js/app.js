@@ -9,7 +9,7 @@ import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { mountCalculator } from './calc.js';
 import {
-  initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncNow, syncState,
+  initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
 } from './sync.js';
 
 const view = document.getElementById('view');
@@ -125,7 +125,7 @@ function confirmButton(sel, armedLabel, action) {
 
 const ROUTES = {
   home: viewHome, start: viewStart, placement: viewPlacement, placed: viewPlaced, practice: viewPractice,
-  test: viewTest, review: viewReview, plan: viewPlan, library: viewLibrary, account: viewAccount,
+  test: viewTest, review: viewReview, plan: viewPlan, library: viewLibrary, resources: viewResources, account: viewAccount,
 };
 
 function render() {
@@ -136,7 +136,7 @@ function render() {
   if (currentRoute === 'test' && route !== 'test' && test && !test.finished && !test.onBreak) leaveQuestion();
   currentRoute = route;
   if (!pool.length && route !== 'library') return go('library');
-  if (!progress.profile.mode && !['library', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
+  if (!progress.profile.mode && !['library', 'resources', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
   renderNav(route);
   window.scrollTo(0, 0);
@@ -152,7 +152,7 @@ function renderNav(active) {
   const testRunning = test && !test.finished;
   const links = [
     ['home', 'Dashboard'], ['practice', 'Practice'], ['test', testRunning ? 'Practice test ●' : 'Practice test'],
-    ['review', `Review${due ? ` <span class="badge">${due}</span>` : ''}`], ['plan', 'Study plan'], ['library', 'Library'],
+    ['review', `Review${due ? ` <span class="badge">${due}</span>` : ''}`], ['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources'],
   ];
   if (syncConfigured) {
     const sync = syncState();
@@ -994,6 +994,59 @@ function viewLibrary() {
   });
 }
 
+// ---------- resources ----------
+
+const RESOURCES = [
+  {
+    title: 'Official practice',
+    links: [
+      ['Bluebook', 'https://bluebook.collegeboard.org/', "College Board's testing app, where the digital SAT is taken. Its full-length practice tests use the same timing, tools and adaptive modules as test day."],
+      ['Download Bluebook', 'https://bluebook.collegeboard.org/students/download-bluebook', 'Install the app on a Mac, Windows PC, iPad or Chromebook.'],
+      ['Official SAT practice tests', 'https://satsuite.collegeboard.org/practice/practice-tests', 'Free full-length practice tests, in Bluebook or as PDFs with answer explanations.'],
+      ['My Practice', 'https://mypractice.collegeboard.org/', 'Scores, answer explanations and skill breakdowns for the practice tests you take in Bluebook.'],
+      ['SAT Suite Question Bank', 'https://satsuiteeducatorquestionbank.collegeboard.org/', "College Board's official question bank. Its PDF exports are what this app's question library is built from."],
+    ],
+  },
+  {
+    title: 'Learn and practice',
+    links: [
+      ['SAT practice and preparation', 'https://satsuite.collegeboard.org/practice', "College Board's hub for free prep materials, including the official study guide."],
+      ['Khan Academy: Digital SAT', 'https://www.khanacademy.org/test-prep/digital-sat', 'Free lessons and practice for each skill on the test.'],
+      ['Desmos test calculator', 'https://www.desmos.com/testing/collegeboard/graphing', 'The version of the Desmos graphing calculator used on the digital SAT, to get comfortable with before test day.'],
+    ],
+  },
+  {
+    title: 'About the test',
+    links: [
+      ["What's on the SAT", 'https://satsuite.collegeboard.org/sat/whats-on-the-test', 'How the test is structured and the skills each section covers.'],
+      ['Register for the SAT', 'https://satsuite.collegeboard.org/sat/registration', 'Sign up for a test date and find a test center.'],
+      ['Test dates and deadlines', 'https://satsuite.collegeboard.org/sat/dates-deadlines', 'Upcoming test dates, registration deadlines and score release dates.'],
+      ['SAT scores', 'https://satsuite.collegeboard.org/scores', 'Getting your scores and understanding what they mean.'],
+    ],
+  },
+  {
+    title: 'Planning for college',
+    links: [
+      ['BigFuture', 'https://bigfuture.collegeboard.org/', "College Board's free site for exploring colleges, careers and scholarships."],
+    ],
+  },
+];
+
+function viewResources() {
+  view.innerHTML = `
+    <h1>Resources</h1>
+    <p class="muted">Official College Board tools and other free places to prepare. Links open in a new tab.</p>
+    <p class="note">Tip: take a full practice test in Bluebook every week or two, then use Practice and Review here on the skills My Practice shows you missed.</p>
+    <div class="cards">${RESOURCES.map(group => `
+      <section class="card">
+        <h2>${esc(group.title)}</h2>
+        <ul class="links">${group.links.map(([title, url, about]) => `
+          <li><a href="${esc(url)}" target="_blank" rel="noopener">${esc(title)} <span aria-hidden="true">↗</span></a><span class="hint">${esc(about)}</span></li>`).join('')}
+        </ul>
+      </section>`).join('')}
+    </div>`;
+}
+
 // ---------- account & sync ----------
 
 function viewAccount() {
@@ -1008,22 +1061,20 @@ function viewAccount() {
   }
   if (sync.account) {
     const time = sync.lastSynced && new Date(sync.lastSynced).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Synced${time ? ` at ${time}` : ''}.` : 'Syncing…';
+    const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Up to date${time ? ` · last synced ${time}` : ''}.` : 'Syncing…';
     view.innerHTML = `
       <h1>Account</h1>
       <div class="card">
         <p>Signed in as <strong>${esc(sync.account)}</strong>.</p>
         <p class="${sync.phase === 'error' ? 'warn' : 'muted'}">${esc(status)}</p>
-        <p class="hint">Practice history, the mistake log, test results and your study plan sync to every device where you sign in. Changes upload a few seconds after you make them.</p>
+        <p class="hint">Practice history, the mistake log, test results and your study plan sync automatically to every device where you sign in. Your changes upload within a few seconds, and changes from your other devices show up on their own.</p>
         <div class="actions">
           ${progress.profile.mode ? '' : '<a class="button primary" href="#/start">Continue</a>'}
-          <button id="sync-now">Sync now</button>
           <button id="sign-out">Sign out</button>
           <button class="danger" id="sign-out-clear">Sign out and clear this device</button>
         </div>
         <p class="hint">Signing out keeps a copy of your progress on this device. On a shared computer, use “Sign out and clear this device.”</p>
       </div>`;
-    on('#sync-now', 'click', () => syncNow({ full: true }));
     on('#sign-out', 'click', () => signOutOfSync());
     confirmButton('#sign-out-clear', 'Click again to sign out and clear', async () => {
       await signOutOfSync();

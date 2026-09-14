@@ -1,15 +1,21 @@
 // Cloud sync: sign in with Google, or with a username and passcode, and progress follows the student
-// across devices. Uses Firebase Authentication and Cloud Firestore on Firebase's free Spark plan. Nothing
-// loads until js/firebase-config.js is filled in; until then the app stays local-only, exactly as before.
+// across devices automatically. Uses Firebase Authentication and Cloud Firestore on Firebase's free Spark
+// plan. Nothing loads until js/firebase-config.js is filled in; until then the app stays local-only.
+//
+// While signed in: local changes upload shortly after they're saved (and right away when the tab is hidden
+// or closed), a live Firestore listener brings in changes from other devices as they happen, and a failed
+// sync retries on its own.
 
 import { FIREBASE_CONFIG } from './firebase-config.js';
-import { mergeProgress, syncProgress } from './sync-core.js';
+import { mergeProgress, progressFromDocs, syncProgress } from './sync-core.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 // Username accounts are Firebase email/password accounts at a reserved domain that can never receive mail,
 // so they have no passcode reset.
 const USERNAME_DOMAIN = 'users.sat-prep.invalid';
-const PUSH_DELAY_MS = 3000;
+const PUSH_DELAY_MS = 1500;
+const RETRY_MS = 30 * 1000;
+const STALE_MS = 5 * 60 * 1000;
 
 export const syncConfigured = Boolean(FIREBASE_CONFIG);
 
@@ -18,8 +24,10 @@ let hooks = null;   // { getProgress, setProgress, onChange }
 let user = null;
 let known = {};
 let pushTimer = null;
+let retryTimer = null;
 let running = null;
 let rerun = null;
+let stopListening = null;
 const state = { phase: syncConfigured ? 'loading' : 'off', message: null, lastSynced: null };
 
 // phase: 'off' (not configured) | 'loading' | 'signed-out' | 'syncing' | 'synced' | 'error'
@@ -30,11 +38,17 @@ function update(patch) {
   hooks?.onChange(syncState());
 }
 
-export async function initSync(appHooks) {
+const loadFromCdn = async () => {
+  const [app, auth, firestore] = await Promise.all(['app', 'auth', 'firestore'].map(m => import(`${SDK}/firebase-${m}.js`)));
+  return { app, auth, firestore };
+};
+
+// loadSdk lets tests supply the Firebase modules from npm instead of the CDN.
+export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
   hooks = appHooks;
   if (!syncConfigured) return;
   try {
-    const [app, auth, firestore] = await Promise.all(['app', 'auth', 'firestore'].map(m => import(`${SDK}/firebase-${m}.js`)));
+    const { app, auth, firestore } = await loadSdk();
     const firebaseApp = app.initializeApp(FIREBASE_CONFIG);
     fb = { auth, firestore, authInstance: auth.getAuth(firebaseApp), db: firestore.getFirestore(firebaseApp) };
   } catch {
@@ -42,22 +56,38 @@ export async function initSync(appHooks) {
     return;
   }
   fb.auth.onAuthStateChanged(fb.authInstance, signedIn => {
+    stopListening?.();
+    clearTimeout(pushTimer);
+    clearTimeout(retryTimer);
+    pushTimer = null;
     user = signedIn;
     known = {};
-    clearTimeout(pushTimer);
     update({ phase: signedIn ? 'syncing' : 'signed-out', message: null, lastSynced: null });
     if (signedIn) syncNow({ full: true });
   });
-  // Pick up what other devices did while this tab was in the background or offline.
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow({ full: true }); });
-  window.addEventListener('online', () => syncNow({ full: true }));
+  globalThis.document?.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      // Upload a pending change before the tab is put away or closed.
+      if (pushTimer) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        syncNow();
+      }
+    } else if (state.phase === 'error' || Date.now() - (state.lastSynced || 0) > STALE_MS) {
+      syncNow({ full: true });
+    }
+  });
+  globalThis.window?.addEventListener('online', () => syncNow({ full: true }));
 }
 
-// Called after every local save; changes are pushed a few seconds later, batched.
+// Called after every local save; changes upload shortly afterwards, batched.
 export function schedulePush() {
   if (!user) return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => syncNow(), PUSH_DELAY_MS);
+  pushTimer = setTimeout(() => {
+    pushTimer = null;
+    syncNow();
+  }, PUSH_DELAY_MS);
 }
 
 // One sync runs at a time; a request made while one is running waits for it, then runs once more.
@@ -80,6 +110,7 @@ export function syncNow({ full = false } = {}) {
 
 async function runSync(full) {
   const uid = user.uid;
+  clearTimeout(retryTimer);
   update({ phase: 'syncing', message: null });
   try {
     const merged = await syncProgress(cloudFor(uid), hooks.getProgress(), known, { full });
@@ -87,11 +118,46 @@ async function runSync(full) {
     // Merge with the local copy once more: the student may have answered something while this ran.
     hooks.setProgress(mergeProgress(hooks.getProgress(), merged));
     update({ phase: 'synced', lastSynced: Date.now() });
+    if (!stopListening) listen(uid);
   } catch (err) {
     if (user?.uid !== uid) return;
     known = {};
     update({ phase: 'error', message: describeError(err) });
+    retryTimer = setTimeout(() => syncNow({ full: true }), RETRY_MS);
   }
+}
+
+// Live updates from other devices. Writes this device makes come back through here too; merging them
+// changes nothing, so they're ignored.
+function listen(uid) {
+  const { collection, doc, onSnapshot } = fb.firestore;
+  const apply = changes => {
+    if (user?.uid !== uid) return;
+    known.docs ||= new Map();
+    for (const [path, json] of changes) known.docs.set(path, json);
+    const before = JSON.stringify(hooks.getProgress());
+    hooks.setProgress(mergeProgress(hooks.getProgress(), progressFromDocs(known.docs)));
+    if (JSON.stringify(hooks.getProgress()) !== before || state.phase !== 'synced') {
+      update({ phase: 'synced', lastSynced: Date.now(), message: null });
+    } else {
+      state.lastSynced = Date.now();
+    }
+  };
+  const failed = err => {
+    stopListening?.();
+    if (user?.uid !== uid) return;
+    update({ phase: 'error', message: describeError(err) });
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => syncNow({ full: true }), RETRY_MS);
+  };
+  const offMain = onSnapshot(doc(fb.db, 'users', uid), snap => apply([['main', snap.data()?.json ?? null]]), failed);
+  const offChunks = onSnapshot(collection(fb.db, 'users', uid, 'responses'),
+    snap => apply(snap.docChanges().map(c => [c.doc.id, c.type === 'removed' ? null : c.doc.data().json])), failed);
+  stopListening = () => {
+    offMain();
+    offChunks();
+    stopListening = null;
+  };
 }
 
 function cloudFor(uid) {
@@ -128,7 +194,12 @@ export async function signInWithUsername(username, passcode, { create = false } 
 }
 
 export async function signOutOfSync() {
-  clearTimeout(pushTimer);
+  // Upload anything still waiting before the account is disconnected.
+  if (pushTimer) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+    syncNow();
+  }
   await running;
   await fb.auth.signOut(fb.authInstance);
 }
@@ -166,7 +237,7 @@ const MESSAGES = {
   'auth/api-key-not-valid.-please-pass-a-valid-api-key.': "The Firebase settings in js/firebase-config.js aren't valid.",
   'auth/invalid-api-key': "The Firebase settings in js/firebase-config.js aren't valid.",
   'permission-denied': 'The cloud database refused access. Check the Firestore security rules.',
-  unavailable: 'Offline. Progress is saved on this device and will sync when you reconnect.',
+  unavailable: "Offline. Progress is saved on this device and will sync when you're back online.",
 };
 
 // An empty string means the student cancelled, so there is nothing to show.
