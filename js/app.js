@@ -13,7 +13,13 @@ import {
 } from './sync.js';
 
 const view = document.getElementById('view');
-const nav = document.getElementById('nav');
+const side = document.getElementById('side');
+const topbar = document.getElementById('topbar');
+const tabs = document.getElementById('tabs');
+const more = document.getElementById('more');
+const shell = document.querySelector('.shell');
+const SIDEBAR_KEY = 'satprep.sidebarCollapsed';
+try { shell.classList.toggle('collapsed', localStorage.getItem(SIDEBAR_KEY) === '1'); } catch { /* storage unavailable */ }
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MISTAKE_REASONS = ['Careless slip', "Didn't know the concept", 'Misread the question', 'Ran out of time', 'Guessed'];
 
@@ -38,6 +44,7 @@ const save = () => { store.saveProgress(progress); schedulePush(); };
 const touch = (...keys) => { for (const key of keys) progress.stamps = { ...progress.stamps, [key]: Date.now() }; };
 const dayKey = t => new Date(t).toLocaleDateString('en-CA');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const streakText = n => (n ? `${n}-day streak` : 'no streak yet');
 
 function go(path) {
   if (location.hash === `#/${path}`) render();
@@ -98,7 +105,7 @@ function snippet(q) {
 // Questions built from exports keep math, graphs and tables as images (see scripts/build-questions.js).
 function imgHtml(image, alt) {
   if (!image?.src) return '';
-  return `<img class="qimg" src="${esc(image.src)}" alt="${esc(alt)}" width="${image.width}" height="${image.height}" loading="lazy">`;
+  return `<img class="qimg" src="${esc(image.src)}" alt="${esc(alt)}" width="${image.width}" height="${image.height}" style="--w:${Number(image.width) || 0}px" loading="lazy">`;
 }
 
 // A typed-in answer drawn as math in the export can't be checked automatically; the student compares
@@ -135,6 +142,7 @@ function render() {
   // Leaving a running test keeps its clock going; bank the time spent and highlights on the open question.
   if (currentRoute === 'test' && route !== 'test' && test && !test.finished && !test.onBreak) leaveQuestion();
   currentRoute = route;
+  setMore(false);
   if (!pool.length && route !== 'library') return go('library');
   if (!progress.profile.mode && !['library', 'resources', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
@@ -147,23 +155,95 @@ function sessionBelongsTo(route) {
   return { placement: 'placement', practice: 'practice', review: 'review' }[route] === session.kind;
 }
 
+const ICONS = {
+  home: '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/>',
+  practice: '<path d="M5 19l1-4L16.5 4.5l3 3L9 18z"/><path d="m14.5 6.5 3 3"/>',
+  test: '<circle cx="12" cy="13.5" r="7"/><path d="M12 10v3.5l2.5 1.5M9.5 3h5"/>',
+  review: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5V9H9"/>',
+  plan: '<rect x="4" y="5.5" width="16" height="14.5" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+  library: '<path d="M4 5h4v14H4zM9.5 5h4v14h-4z"/><path d="m15.2 5.8 3.4-.9 2.9 13.4-3.4.9z"/>',
+  resources: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  chevron: '<path d="m14.5 6-6 6 6 6"/>',
+  more: '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
+};
+const icon = name => `<svg class="icon icon-${name}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+
+// Today's progress toward the daily goal, drawn as a ring.
+function ring(value, max, size = 46) {
+  const circumference = 2 * Math.PI * 19;
+  const done = Math.min(1, value / Math.max(1, max));
+  const fill = done ? `<circle class="ring-fill" cx="24" cy="24" r="19" stroke-dasharray="${(done * circumference).toFixed(1)} ${circumference.toFixed(1)}" transform="rotate(-90 24 24)"/>` : '';
+  return `<svg class="ring" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true"><circle class="ring-track" cx="24" cy="24" r="19"/>${fill}</svg>`;
+}
+
+// The sidebar on wide screens; a top bar, bottom tabs and a "More" sheet on phones.
 function renderNav(active) {
   const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
+  const today = answeredToday();
+  const goal = progress.plan.dailyGoal;
   const testRunning = test && !test.finished;
-  const links = [
-    ['home', 'Dashboard'], ['practice', 'Practice'], ['test', testRunning ? 'Practice test ●' : 'Practice test'],
-    ['review', `Review${due ? ` <span class="badge">${due}</span>` : ''}`], ['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources'],
-  ];
-  if (syncConfigured) {
-    const sync = syncState();
-    links.push(['account', sync.account ? `${sync.phase === 'error' ? '⚠ ' : ''}Account` : 'Sign in']);
-  }
-  nav.innerHTML = links.map(([r, label]) => `<a href="#/${r}" class="${r === active ? 'active' : ''}">${label}</a>`).join('');
+  const sync = syncConfigured ? syncState() : null;
+  const syncText = !sync ? '' : !sync.account ? 'Sign in to sync' : sync.phase === 'error' ? 'Sync problem' : sync.lastSynced ? 'Synced' : 'Syncing…';
+  const syncDot = !sync?.account ? '' : sync.phase === 'error' ? 'bad' : 'ok';
+  const current = r => (r === active ? ' class="on" aria-current="page"' : '');
+  const badge = r => (r === 'review' && due ? `<span class="badge">${due}</span>`
+    : r === 'test' && testRunning ? '<span class="badge live">In progress</span>' : '');
+
+  const links = [['home', 'Dashboard'], ['practice', 'Practice'], ['test', 'Practice test'], ['review', 'Review'], ['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources']];
+  // Collapsed, the sidebar is a strip of icons; names move into tooltips and accessible labels.
+  const collapsed = shell.classList.contains('collapsed');
+  const tip = text => (collapsed ? ` title="${esc(text)}"` : '');
+  const toggleLabel = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  const goalText = `${today} of ${goal} questions today`;
+  side.innerHTML = `
+    <div class="side-head">
+      <a class="brand" href="#/home">SAT Prep</a>
+      <button type="button" class="collapse" id="collapse" aria-label="${toggleLabel}" title="${toggleLabel}" aria-expanded="${!collapsed}">${icon('chevron')}</button>
+    </div>
+    <nav class="side-nav" aria-label="Main">${links.map(([r, label]) => {
+      const name = r === 'review' && due ? `${label}, ${due} due` : r === 'test' && testRunning ? `${label}, in progress` : label;
+      return `<a href="#/${r}"${current(r)} aria-label="${name}"${tip(name)}>${icon(r)}<span class="label">${label}</span>${badge(r)}</a>`;
+    }).join('')}</nav>
+    <div class="goal" role="img" aria-label="${goalText}"${tip(goalText)}>${ring(today, goal)}<div class="label"><strong>${today} of ${goal}</strong><span>today · ${streakText(streakDays())}</span></div></div>
+    ${sync ? `<a class="sync${active === 'account' ? ' on' : ''}" href="#/account" aria-label="${syncText}${sync.account ? `: ${esc(sync.account)}` : ''}"${tip(syncText)}><i class="dot ${syncDot}"></i><span class="label">${syncText}${sync.account ? `<small>${esc(sync.account)}</small>` : ''}</span></a>` : ''}`;
+
+  topbar.innerHTML = `
+    <a class="brand" href="#/home">SAT Prep</a>
+    <a class="top-goal" href="#/home" aria-label="${today} of ${goal} questions today">${ring(today, goal, 28)}<span>${today}/${goal}</span></a>
+    ${sync ? `<a class="top-sync" href="#/account" aria-label="${syncText}"><i class="dot ${syncDot}"></i></a>` : ''}`;
+
+  const tabLinks = [['home', 'Home'], ['practice', 'Practice'], ['test', 'Test'], ['review', 'Review']];
+  const moreLinks = [['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources'], ...(sync ? [['account', sync.account ? 'Account' : 'Sign in']] : [])];
+  const inMore = moreLinks.some(([r]) => r === active);
+  tabs.innerHTML = `${tabLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${icon(r)}<span>${label}</span>${badge(r)}</a>`).join('')}
+    <button type="button" id="more-toggle"${inMore ? ' class="on"' : ''} aria-expanded="${!more.hidden}" aria-controls="more">${icon('more')}<span>More</span></button>`;
+  more.innerHTML = moreLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${label}<span aria-hidden="true">›</span></a>`).join('');
 }
+
+function toggleSidebar() {
+  const collapsed = shell.classList.toggle('collapsed');
+  try { localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0'); } catch { /* storage unavailable */ }
+  renderNav(currentRoute);
+  document.getElementById('collapse')?.focus();
+}
+
+function setMore(open) {
+  more.hidden = !open;
+  document.getElementById('more-toggle')?.setAttribute('aria-expanded', String(open));
+}
+
+document.addEventListener('click', e => {
+  if (e.target.closest('#collapse')) return toggleSidebar();
+  if (e.target.closest('#more-toggle')) return setMore(more.hidden);
+  if (!more.hidden && (!e.target.closest('#more') || e.target.closest('#more a'))) setMore(false);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !more.hidden) setMore(false); });
 
 // ---------- shared question rendering ----------
 
+// A passage or figure goes in its own reading column, beside the question on wide screens like the real test.
 function questionHtml(q, st = {}) {
+  let reading = '';
   let prompt;
   if (q.promptImage) {
     prompt = `<div class="prompt-image">${imgHtml(q.promptImage, 'The question, as shown in the College Board export')}</div>`;
@@ -171,7 +251,8 @@ function questionHtml(q, st = {}) {
     const passage = q.passage || st.passageHtml
       ? `<div class="passage">${st.passageHtml ?? para(q.passage)}</div>` : '';
     const figures = (q.figures || []).map(src => `<img class="figure" src="${esc(src)}" alt="Figure for this question">`).join('');
-    prompt = `${passage}${figures}<div class="stem">${para(q.stem)}</div>`;
+    if (passage || figures) reading = `<div class="q-read">${passage}${figures}</div>`;
+    prompt = `<div class="stem">${para(q.stem)}</div>`;
   }
   let answer;
   if (q.choices) {
@@ -182,8 +263,11 @@ function questionHtml(q, st = {}) {
         st.revealed && c.letter === q.answer && 'correct',
         st.revealed && st.selected === c.letter && c.letter !== q.answer && 'wrong',
       ].filter(Boolean).join(' ');
+      const tag = !st.revealed ? ''
+        : c.letter === q.answer ? '<span class="tag ok">✓ Correct answer</span>'
+        : st.selected === c.letter ? '<span class="tag bad">✗ Your answer</span>' : '';
       return `<li class="${cls}" data-letter="${c.letter}">
-        <button class="choice-btn" data-choice="${c.letter}" ${st.revealed ? 'disabled' : ''}><span class="letter">${c.letter}</span>${c.image ? imgHtml(c.image, `Choice ${c.letter}`) : `<span>${inline(c.text)}</span>`}</button>
+        <button class="choice-btn" data-choice="${c.letter}" ${st.revealed ? 'disabled' : ''}><span class="letter">${c.letter}</span>${c.image ? imgHtml(c.image, `Choice ${c.letter}`) : `<span>${inline(c.text)}</span>`}${tag}</button>
         ${st.tools ? `<button class="strike" data-strike="${c.letter}" title="Cross out choice ${c.letter}" aria-label="Cross out choice ${c.letter}">✕</button>` : ''}
       </li>`;
     }).join('')}</ol>`;
@@ -201,13 +285,13 @@ function questionHtml(q, st = {}) {
     feedback = st.correct == null
       ? `<div class="feedback pending"><strong>Compare your answer.</strong> ${key}
           <div class="actions"><button class="primary" data-self="1">I got it right</button><button data-self="0">I got it wrong</button></div></div>`
-      : `<div class="feedback ${st.correct ? 'ok' : 'bad'}"><strong>${st.correct ? 'Correct.' : 'Not quite.'}</strong> ${key}
+      : `<div class="feedback ${st.correct ? 'ok' : 'bad'}"><strong>${st.correct ? '✓ Correct.' : '✗ Not quite.'}</strong> ${key}
           ${rationale ? `<div class="rationale">${rationale}</div>` : ''}</div>`;
   }
   const original = st.revealed && q.original
     ? `<details class="original"><summary>View the original from the export</summary>${imgHtml(q.original, 'The original question')}</details>` : '';
   const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(q.skill)} · ${esc(q.difficulty)}${q.source === 'demo' ? ' · demo' : ''}</div>`;
-  return `<article class="question">${meta}${prompt}${answer}${feedback}${original}</article>`;
+  return `<article class="question${reading ? ' split' : ''}">${meta}${reading}<div class="q-work">${prompt}${answer}${feedback}${original}</div></article>`;
 }
 
 // Wires up choice selection, crossing out and typed answers without re-rendering (so highlights survive).
@@ -297,7 +381,7 @@ function renderDrill(headerHtml, source, rerender) {
   } else {
     bindReasonPicker(q.id);
     on('#next', 'click', () => { session.q = null; rerender(); window.scrollTo(0, 0); });
-    $('#next').focus();
+    $('#next').focus({ preventScroll: true }); // keep the marked choices in view
   }
 }
 
@@ -463,11 +547,11 @@ function viewReview(arg) {
           : '<p class="muted">Nothing yet.</p>'}
       </div>
     </div>
-    ${entries.length ? `<div class="card"><h2>Mistake log</h2><div class="table-wrap"><table>
+    ${entries.length ? `<div class="card"><h2>Mistake log</h2><div class="table-wrap"><table class="stack">
       <thead><tr><th>Question</th><th>Skill</th><th>Difficulty</th><th>Reason</th><th>Next review</th></tr></thead>
       <tbody>${entries.map(([id, m]) => {
         const q = byId.get(id);
-        return `<tr><td>${esc(snippet(q))}</td><td>${esc(q.skill)}</td><td>${q.difficulty}</td><td>${esc(m.reason || '—')}</td><td>${m.due <= Date.now() ? 'Now' : new Date(m.due).toLocaleDateString()}</td></tr>`;
+        return `<tr><td>${esc(snippet(q))}</td><td data-label="Skill">${esc(q.skill)}</td><td data-label="Difficulty">${q.difficulty}</td><td data-label="Reason">${esc(m.reason || '—')}</td><td data-label="Next review">${m.due <= Date.now() ? 'Now' : new Date(m.due).toLocaleDateString()}</td></tr>`;
       }).join('')}</tbody></table></div></div>` : ''}`;
   on('#go', 'click', () => go('review/go'));
 }
@@ -509,10 +593,10 @@ function viewTest() {
         <div class="card"><h2>${title}</h2><p class="muted">${sub} · ${time}</p><button class="primary" data-test="${k}" ${(k === 'FULL' ? ['RW', 'MATH'] : [k]).every(sec => usable[sec]) ? '' : 'disabled'}>Start</button></div>`).join('')}
     </div>
     ${usable.RW < sizes.RW || usable.MATH < sizes.MATH ? `<p class="note">A full-length section needs ${sizes.RW} Reading and Writing or ${sizes.MATH} Math questions that can be scored automatically. You have ${usable.RW} and ${usable.MATH}, so modules will be shorter until you add more exports.</p>` : ''}
-    ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table>
+    ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table class="stack">
       <thead><tr><th>Date</th><th>Test</th><th>Reading and Writing</th><th>Math</th></tr></thead>
-      <tbody>${[...progress.tests].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td>${esc(t.kind)}</td>
-        ${['RW', 'MATH'].map(s => `<td>${t.summary[s] ? `${t.summary[s].score.mid} <span class="muted">(${t.summary[s].correct}/${t.summary[s].total})</span>` : '—'}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tbody>${[...progress.tests].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}</td>
+        ${['RW', 'MATH'].map(s => `<td data-label="${SECTIONS[s].name}">${t.summary[s] ? `${t.summary[s].score.mid} <span class="muted">(${t.summary[s].correct}/${t.summary[s].total})</span>` : '—'}</td>`).join('')}</tr>`).join('')}</tbody>
     </table></div></div>` : ''}`;
   on('[data-test]', 'click', e => startTest(e.currentTarget.dataset.test));
 }
@@ -696,7 +780,7 @@ function bindGrid() {
 function bindHighlighter() {
   const passage = view.querySelector('.passage');
   if (!passage) return;
-  passage.addEventListener('mouseup', () => {
+  const highlightSelection = () => {
     if (!test.highlightMode) return;
     const sel = window.getSelection();
     if (!sel.rangeCount || sel.isCollapsed) return;
@@ -708,7 +792,10 @@ function bindHighlighter() {
       // Selections that cross paragraph boundaries can't be wrapped in a single element.
     }
     sel.removeAllRanges();
-  });
+  };
+  passage.addEventListener('mouseup', highlightSelection);
+  // On touch screens the selection is final only once the finger lifts.
+  passage.addEventListener('touchend', () => setTimeout(highlightSelection, 0));
   passage.addEventListener('click', e => {
     if (test.highlightMode && e.target.tagName === 'MARK') e.target.replaceWith(...e.target.childNodes);
   });
@@ -819,57 +906,86 @@ const REFERENCE_SHEET = `<div class="ref"><h3>Formulas</h3><p class="hint">Model
 
 // ---------- dashboard ----------
 
+function weakestSkills(n) {
+  return ['RW', 'MATH']
+    .flatMap(sec => skillAbilities(progress, sec).filter(s => s.answered >= 2))
+    .sort((a, b) => a.theta - b.theta).slice(0, n);
+}
+
+// "Up next" on the dashboard: due reviews first, then whatever is left of today's goal.
+function nextStep() {
+  const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
+  const left = Math.max(0, progress.plan.dailyGoal - answeredToday());
+  const weakest = weakestSkills(2);
+  const rw = sectionEstimate('RW');
+  const math = sectionEstimate('MATH');
+  const section = rw && math ? (rw.mid <= math.mid ? 'RW' : 'MATH') : weakest[0]?.section ?? 'MATH';
+  // Skill names can contain "and", so they're separated with a dot.
+  const sub = weakest.length ? `Focus: ${weakest.map(s => s.name).join(' · ')}` : 'Practice adapts to your weak spots as you go.';
+  if (due) {
+    return { title: `Clear ${plural(due, 'review question')}${left ? `, then ${plural(left, 'practice question')}` : ''}`, sub, cta: 'Start review', href: '#/review/go' };
+  }
+  if (left) return { title: `${plural(left, 'practice question')} left for today’s goal`, sub, cta: 'Start practice', href: `#/practice/${section}` };
+  return { title: 'Today’s goal is done', sub: 'Keep going, or take a timed section to check your pacing.', cta: 'Practice more', href: `#/practice/${section}` };
+}
+
 function viewHome() {
   if (test?.finished) test = null;
   const est = { RW: sectionEstimate('RW'), MATH: sectionEstimate('MATH') };
   const total = projectedTotal();
   const today = answeredToday();
   const goal = progress.plan.dailyGoal;
-  const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
   const days = daysUntilTest();
-  const profile = progress.profile.mode === 'grade'
-    ? `Starting level: grade ${progress.profile.grade}`
-    : 'Starting level: placement test';
+  const target = progress.plan.target;
+  const next = nextStep();
+  const testDay = progress.plan.testDate
+    && new Date(`${progress.plan.testDate}T00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const eyebrow = days == null ? '<a href="#/plan">Set your test date</a>'
+    : days >= 0 ? `${plural(days, 'day')} to test day · ${testDay}` : 'Your test date has passed · <a href="#/plan">update it</a>';
+  const profile = progress.profile.mode === 'grade' ? `Starting level: grade ${progress.profile.grade}` : 'Starting level: placement test';
 
-  const scoreCard = (label, s) => `<div class="card"><div class="eyebrow">${label}</div>${s
-    ? `<div class="big">${s.mid}</div><div class="range">likely ${s.low}–${s.high}</div>`
-    : '<p class="muted">Answer a few more questions to see an estimate.</p>'}</div>`;
+  const scoreTile = (label, s, cls = '', extra = '') => `<div class="score ${cls}">
+      <span class="eyebrow">${label}</span>
+      ${s ? `<span class="big">${s.mid}</span><span class="range">likely ${s.low}–${s.high}${extra}</span>`
+        : `<span class="range">${cls ? 'Practice both sections to see your total' : 'Answer a few more questions to see an estimate'}${extra}.</span>`}
+    </div>`;
 
   const mastery = section => {
     const skills = skillAbilities(progress, section);
     return DOMAINS.filter(d => d.section === section).map(d => `
-      <div class="domain-label">${esc(d.name)}</div>
+      <p class="domain-label">${esc(d.name)}</p>
       ${skills.filter(s => d.skills.some(x => x.name === s.name)).map(s => {
         const p = pCorrect(s.theta, DIFFICULTY_B.Medium);
-        return `<div class="skill-row" title="${esc(s.name)}"><span class="name">${esc(s.name)}</span>
+        return `<div class="skill-row"><span class="name">${esc(s.name)}</span>
           ${s.answered ? `<div class="track"><div class="fill ${masteryClass(p)}" style="width:${Math.round(p * 100)}%"></div></div><span class="pct">${s.correct}/${s.answered}</span>`
-            : '<div class="track"></div><span class="pct muted">not started</span>'}</div>`;
+            : '<div class="track"></div><span class="pct">not yet</span>'}</div>`;
       }).join('')}`).join('');
   };
 
   view.innerHTML = `
-    <div class="bar"><h1>Dashboard</h1><span class="muted">${profile} · <a href="#/start">change</a></span></div>
-    <div class="cards">
-      ${total ? `<div class="card"><div class="eyebrow">Estimated total</div><div class="big">${total.mid}</div><div class="range">likely ${total.low}–${total.high}${progress.plan.target ? ` · target ${progress.plan.target}` : ''}</div></div>` : ''}
-      ${scoreCard('Reading and Writing', est.RW)}
-      ${scoreCard('Math', est.MATH)}
-      <div class="card"><div class="eyebrow">Today</div>
-        <div class="big">${today}<span class="muted" style="font-size:1rem"> / ${goal}</span></div>
-        <div class="track"><div class="fill ${today >= goal ? 'high' : ''}" style="width:${Math.min(100, (today / goal) * 100)}%"></div></div>
-        <p class="muted" style="margin-top:0.5rem">${plural(streakDays(), 'day')} streak${days != null ? ` · ${days >= 0 ? `${plural(days, 'day')} to test day` : 'test date passed'}` : ''}</p>
+    <header class="page-head">
+      <p class="eyebrow">${eyebrow}</p>
+      <h1>Dashboard</h1>
+    </header>
+    <p class="today-mobile">${ring(today, goal, 36)}<span><strong>${today} of ${goal}</strong> today · ${streakText(streakDays())}</span></p>
+    <section class="next">
+      <div>
+        <p class="eyebrow">Up next</p>
+        <h2>${esc(next.title)}</h2>
+        <p class="muted">${esc(next.sub)}</p>
       </div>
+      <a class="button primary" href="${next.href}">${next.cta}</a>
+    </section>
+    <div class="scores">
+      ${scoreTile('Estimated total', total, 'total', target ? ` · target ${target}` : '')}
+      ${scoreTile('Reading and Writing', est.RW)}
+      ${scoreTile('Math', est.MATH)}
     </div>
-    <div class="actions">
-      <a class="button primary" href="#/practice/RW">Practice Reading and Writing</a>
-      <a class="button primary" href="#/practice/MATH">Practice Math</a>
-      <a class="button" href="#/test">Timed practice test</a>
-      <a class="button" href="#/review">Review${due ? ` (${due} due)` : ''}</a>
+    <div class="skills">
+      <section><h2>Reading and Writing</h2>${mastery('RW')}</section>
+      <section><h2>Math</h2>${mastery('MATH')}</section>
     </div>
-    <div class="cards">
-      <div class="card"><h2>Reading and Writing skills</h2>${mastery('RW')}</div>
-      <div class="card"><h2>Math skills</h2>${mastery('MATH')}</div>
-    </div>
-    <p class="note">Bar length is your estimated chance of answering a Medium question in that skill correctly. Score ranges are estimates, not official College Board scores.</p>`;
+    <p class="hint">Bars show your estimated chance of answering a Medium question in each skill correctly. Scores are estimates, not official College Board scores. ${profile} · <a href="#/start">change</a></p>`;
 }
 
 // ---------- study plan ----------
@@ -895,9 +1011,7 @@ function viewPlan() {
   const total = projectedTotal();
   const gap = plan.target && total ? plan.target - total.mid : null;
   const suggestion = suggestedDailyGoal(days, gap);
-  const weakest = ['RW', 'MATH']
-    .flatMap(sec => skillAbilities(progress, sec).filter(s => s.answered >= 2))
-    .sort((a, b) => a.theta - b.theta).slice(0, 5);
+  const weakest = weakestSkills(5);
   const weakerSection = sectionEstimate('RW') && sectionEstimate('MATH')
     ? (sectionEstimate('RW').mid < sectionEstimate('MATH').mid ? 'RW' : 'MATH') : null;
 
@@ -971,13 +1085,13 @@ function viewLibrary() {
       ? `<p class="note">No College Board questions are built in yet, so ${plural(pool.length, 'demo question')} are in use. To add real ones, ${addMore}.</p>`
       : `<p class="muted">${plural(pool.length, 'question')} from ${plural(library.files, 'export')}. To add more, ${addMore}.</p>`}
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
-    <div class="card" style="margin-top:1rem">
+    <div class="card">
       <div class="table-wrap"><table>
         <thead><tr><th>Section</th><th>Domain</th><th class="num">Easy</th><th class="num">Medium</th><th class="num">Hard</th><th class="num">Total</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>
-    <div class="card" style="margin-top:1rem">
+    <div class="card">
       <h2>Settings</h2>
       <p class="hint">Resetting erases practice history, the mistake log, test results and your study plan${syncConfigured ? ' on every device signed in to your account' : ''}.</p>
       <div class="actions"><button class="danger" id="reset">Reset all progress</button></div>

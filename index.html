@@ -2,16 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1F242B">
   <title>SAT Prep</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Source+Sans+3:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <header class="site">
-    <a class="brand" href="#/home">SAT Prep</a>
-    <nav id="nav"></nav>
-  </header>
-  <main id="view"><p class="muted">Loading…</p></main>
+  <div class="shell">
+    <aside class="side" id="side"></aside>
+    <header class="topbar" id="topbar"></header>
+    <main id="view"><p class="muted">Loading…</p></main>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="Main"></nav>
+  <div class="sheet" id="more" hidden></div>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
