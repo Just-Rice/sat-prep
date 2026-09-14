@@ -50,7 +50,8 @@ test('missed questions come back on a growing schedule and graduate', () => {
   assert.deepEqual(dueMistakes(m, now + DAY), ['q1']);
   let t = now;
   for (let k = 0; k < 5; k++) { t += 31 * DAY; reviewMistake(m, 'q1', true, t); }
-  assert.equal(m.q1, undefined);
+  assert.ok(m.q1.graduated);
+  assert.deepEqual(dueMistakes(m, t + 365 * DAY), []);
   addMistake(m, 'q2', null, now);
   reviewMistake(m, 'q2', true, now);
   reviewMistake(m, 'q2', false, now);

@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Each signed-in student can read and write only their own progress: users/{uid} and the answer chunks
+// under users/{uid}/responses. Everything else is closed.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

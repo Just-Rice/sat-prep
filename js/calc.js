@@ -1,15 +1,11 @@
-// Calculator panel. With a Desmos API key (saved in Library → Settings) it embeds the Desmos graphing
-// calculator the real test uses; without one it falls back to a built-in scientific calculator.
+// Calculator panel: the Desmos graphing calculator the real test uses, or a built-in scientific calculator
+// when Desmos can't load (offline, for example).
 
-const KEY_STORAGE = 'satprep.desmosKey';
+// Desmos API keys are meant to be embedded in web pages; this one is for personal, non-commercial use.
+const DESMOS_API_KEY = '8a0a6f0e8b3c4ad4a8d9e0a991540c58';
 
-export function getDesmosKey() {
-  try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; }
-}
-
-export function setDesmosKey(key) {
-  try { key ? localStorage.setItem(KEY_STORAGE, key.trim()) : localStorage.removeItem(KEY_STORAGE); } catch { /* storage unavailable */ }
-}
+// Earlier versions asked for a key in Library → Settings; that saved copy is no longer used.
+try { localStorage.removeItem('satprep.desmosKey'); } catch { /* storage unavailable */ }
 
 let desmosLoad;
 function loadDesmos(key) {
@@ -26,18 +22,15 @@ function loadDesmos(key) {
 // isCurrent reports whether the calculator is still wanted once Desmos finishes loading; the student may
 // have switched to the reference sheet in the meantime.
 export async function mountCalculator(container, isCurrent = () => true) {
-  const key = getDesmosKey();
-  if (key) {
-    try {
-      const Desmos = await loadDesmos(key);
-      if (!isCurrent()) return;
-      container.innerHTML = '<div class="desmos"></div>';
-      Desmos.GraphingCalculator(container.firstChild, { expressionsCollapsed: false });
-      return;
-    } catch { /* fall through to the built-in calculator */ }
+  try {
+    const Desmos = await loadDesmos(DESMOS_API_KEY);
     if (!isCurrent()) return;
-  }
-  mountScientific(container, key ? 'Desmos could not load, so the built-in calculator is shown.' : 'Add a Desmos API key in Library → Settings to use the graphing calculator.');
+    container.innerHTML = '<div class="desmos"></div>';
+    Desmos.GraphingCalculator(container.firstChild, { expressionsCollapsed: false });
+    return;
+  } catch { /* fall through to the built-in calculator */ }
+  if (!isCurrent()) return;
+  mountScientific(container, 'Desmos could not load, so the built-in calculator is shown.');
 }
 
 function mountScientific(container, note) {

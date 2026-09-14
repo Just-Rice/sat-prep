@@ -7,7 +7,10 @@ import {
 } from './adaptive.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
-import { getDesmosKey, mountCalculator, setDesmosKey } from './calc.js';
+import { mountCalculator } from './calc.js';
+import {
+  initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncNow, syncState,
+} from './sync.js';
 
 const view = document.getElementById('view');
 const nav = document.getElementById('nav');
@@ -30,7 +33,9 @@ const para = t => esc(t).split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')
 const inline = t => esc(t).replace(/\n/g, '<br>');
 const $ = sel => view.querySelector(sel);
 const on = (sel, event, fn) => view.querySelectorAll(sel).forEach(el => el.addEventListener(event, fn));
-const save = () => store.saveProgress(progress);
+const save = () => { store.saveProgress(progress); schedulePush(); };
+// Records when a synced setting changed, so the newest edit wins across devices (see sync-core.js).
+const touch = (...keys) => { for (const key of keys) progress.stamps = { ...progress.stamps, [key]: Date.now() }; };
 const dayKey = t => new Date(t).toLocaleDateString('en-CA');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -120,7 +125,7 @@ function confirmButton(sel, armedLabel, action) {
 
 const ROUTES = {
   home: viewHome, start: viewStart, placement: viewPlacement, placed: viewPlaced, practice: viewPractice,
-  test: viewTest, review: viewReview, plan: viewPlan, library: viewLibrary,
+  test: viewTest, review: viewReview, plan: viewPlan, library: viewLibrary, account: viewAccount,
 };
 
 function render() {
@@ -131,7 +136,7 @@ function render() {
   if (currentRoute === 'test' && route !== 'test' && test && !test.finished && !test.onBreak) leaveQuestion();
   currentRoute = route;
   if (!pool.length && route !== 'library') return go('library');
-  if (!progress.profile.mode && !['library', 'start', 'placement', 'placed'].includes(route)) return go('start');
+  if (!progress.profile.mode && !['library', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
   renderNav(route);
   window.scrollTo(0, 0);
@@ -149,6 +154,10 @@ function renderNav(active) {
     ['home', 'Dashboard'], ['practice', 'Practice'], ['test', testRunning ? 'Practice test ●' : 'Practice test'],
     ['review', `Review${due ? ` <span class="badge">${due}</span>` : ''}`], ['plan', 'Study plan'], ['library', 'Library'],
   ];
+  if (syncConfigured) {
+    const sync = syncState();
+    links.push(['account', sync.account ? `${sync.phase === 'error' ? '⚠ ' : ''}Account` : 'Sign in']);
+  }
   nav.innerHTML = links.map(([r, label]) => `<a href="#/${r}" class="${r === active ? 'active' : ''}">${label}</a>`).join('');
 }
 
@@ -251,6 +260,7 @@ function bindReasonPicker(qid) {
   on('[data-reason]', 'click', e => {
     if (!progress.mistakes[qid]) return;
     progress.mistakes[qid].reason = e.currentTarget.dataset.reason;
+    progress.mistakes[qid].updatedAt = Date.now();
     save();
     view.querySelectorAll('[data-reason]').forEach(b => b.classList.toggle('active', b === e.currentTarget));
   });
@@ -298,6 +308,7 @@ function viewStart() {
   view.innerHTML = `
     <h1>How should we find your level?</h1>
     <p class="muted">Either way, practice keeps adapting to how you actually do. You can change this later.</p>
+    ${syncConfigured && !syncState().account ? '<p class="note">Already studying on another device? <a href="#/account">Sign in</a> to bring your progress here.</p>' : ''}
     <div class="cards">
       <div class="card">
         <h2>Take the placement test</h2>
@@ -317,6 +328,7 @@ function viewStart() {
   on('#placement', 'click', () => {
     progress.profile.mode = 'placement';
     progress.placement = { RW: null, MATH: null };
+    touch('profile', 'placement');
     save();
     session = null;
     go('placement/RW');
@@ -324,6 +336,7 @@ function viewStart() {
   on('#use-grade', 'click', () => {
     progress.profile = { mode: 'grade', grade: Number($('#grade').value) };
     progress.placement = { RW: null, MATH: null };
+    touch('profile', 'placement');
     save();
     go('home');
   });
@@ -363,6 +376,7 @@ function viewPlacement(arg) {
 function finishPlacement(section, estimate) {
   if (estimate && session.answered.length) {
     progress.placement[section] = { theta: estimate.theta, se: estimate.se, items: session.answered.length, finishedAt: Date.now() };
+    touch('placement');
     save();
   }
   session = null;
@@ -432,7 +446,7 @@ function viewPractice(arg) {
 function viewReview(arg) {
   if (arg === 'go') return reviewSession();
   session = null;
-  const entries = Object.entries(progress.mistakes).filter(([id]) => byId.has(id)).sort((a, b) => a[1].due - b[1].due);
+  const entries = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated).sort((a, b) => a[1].due - b[1].due);
   const due = entries.filter(([, m]) => m.due <= Date.now()).length;
   const reasons = {};
   for (const [, m] of entries) reasons[m.reason || 'Not tagged'] = (reasons[m.reason || 'Not tagged'] || 0) + 1;
@@ -929,10 +943,11 @@ function viewPlan() {
       target: Number(f.get('target')) || null,
       dailyGoal: Math.max(5, Number(f.get('dailyGoal')) || 20),
     };
+    touch('plan');
     save();
     viewPlan();
   });
-  on('#use-suggestion', 'click', () => { progress.plan.dailyGoal = suggestion; save(); viewPlan(); });
+  on('#use-suggestion', 'click', () => { progress.plan.dailyGoal = suggestion; touch('plan'); save(); viewPlan(); });
   on('[data-focus]', 'click', e => {
     const { focus, section } = e.currentTarget.dataset;
     session = { kind: 'practice', section, skill: focus, done: 0, correct: 0, q: null };
@@ -964,25 +979,100 @@ function viewLibrary() {
     </div>
     <div class="card" style="margin-top:1rem">
       <h2>Settings</h2>
-      <form id="desmos-form" class="field">
-        <span>Desmos API key <span class="muted">(optional)</span></span>
-        <span class="hint">The real SAT uses the Desmos graphing calculator. Desmos requires an API key to embed it; you can request one at <a href="https://www.desmos.com/my-api" target="_blank" rel="noopener">desmos.com/my-api</a>. Without a key, a built-in scientific calculator is used.</span>
-        <div class="actions" style="margin:0.3rem 0 0"><input name="key" value="${esc(getDesmosKey())}" autocomplete="off" spellcheck="false" style="flex:1;min-width:0"><button>Save key</button></div>
-      </form>
+      <p class="hint">Resetting erases practice history, the mistake log, test results and your study plan${syncConfigured ? ' on every device signed in to your account' : ''}.</p>
       <div class="actions"><button class="danger" id="reset">Reset all progress</button></div>
     </div>`;
 
-  on('#desmos-form', 'submit', e => {
-    e.preventDefault();
-    setDesmosKey(new FormData(e.currentTarget).get('key'));
-    e.currentTarget.querySelector('button').textContent = 'Saved';
-  });
   confirmButton('#reset', 'Click again to erase progress', () => {
-    progress = store.defaultProgress();
+    // The reset time travels with synced progress, so every signed-in device drops what came before it.
+    const now = Date.now();
+    progress = { ...store.defaultProgress(), resetAt: now, stamps: { profile: now, placement: now, plan: now } };
     save();
     session = null;
     test = null;
     go('start');
+  });
+}
+
+// ---------- account & sync ----------
+
+function viewAccount() {
+  if (!syncConfigured) {
+    view.innerHTML = `<h1>Account</h1><p class="note">Cloud sync isn't set up for this copy of SAT Prep, so progress stays on this device.</p>`;
+    return;
+  }
+  const sync = syncState();
+  if (sync.phase === 'loading') {
+    view.innerHTML = '<h1>Account</h1><p class="muted">Connecting…</p>';
+    return;
+  }
+  if (sync.account) {
+    const time = sync.lastSynced && new Date(sync.lastSynced).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Synced${time ? ` at ${time}` : ''}.` : 'Syncing…';
+    view.innerHTML = `
+      <h1>Account</h1>
+      <div class="card">
+        <p>Signed in as <strong>${esc(sync.account)}</strong>.</p>
+        <p class="${sync.phase === 'error' ? 'warn' : 'muted'}">${esc(status)}</p>
+        <p class="hint">Practice history, the mistake log, test results and your study plan sync to every device where you sign in. Changes upload a few seconds after you make them.</p>
+        <div class="actions">
+          ${progress.profile.mode ? '' : '<a class="button primary" href="#/start">Continue</a>'}
+          <button id="sync-now">Sync now</button>
+          <button id="sign-out">Sign out</button>
+          <button class="danger" id="sign-out-clear">Sign out and clear this device</button>
+        </div>
+        <p class="hint">Signing out keeps a copy of your progress on this device. On a shared computer, use “Sign out and clear this device.”</p>
+      </div>`;
+    on('#sync-now', 'click', () => syncNow({ full: true }));
+    on('#sign-out', 'click', () => signOutOfSync());
+    confirmButton('#sign-out-clear', 'Click again to sign out and clear', async () => {
+      await signOutOfSync();
+      progress = store.defaultProgress();
+      store.saveProgress(progress);
+      session = null;
+      test = null;
+      go('start');
+    });
+    return;
+  }
+
+  view.innerHTML = `
+    <h1>Sign in to sync</h1>
+    <p class="muted">Keep your progress on every device you study on. Progress already on this device is added to your account.</p>
+    <div class="cards">
+      <div class="card">
+        <h2>Google</h2>
+        <p>Sign in with your Google account.</p>
+        <button class="primary" id="google">Sign in with Google</button>
+      </div>
+      <form class="card" id="username-form">
+        <h2>Username and passcode</h2>
+        <label class="field">Username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+        <label class="field">Passcode <input name="passcode" type="password" autocomplete="current-password" required></label>
+        <div class="actions"><button class="primary" data-mode="sign-in">Sign in</button><button data-mode="create">Create account</button></div>
+        <p class="hint">A forgotten passcode can't be recovered, so keep it somewhere safe.</p>
+      </form>
+    </div>
+    <p class="warn" id="auth-error" role="alert">${esc(sync.phase === 'error' ? sync.message : '')}</p>`;
+
+  const buttons = () => view.querySelectorAll('button');
+  const attempt = async action => {
+    buttons().forEach(b => { b.disabled = true; });
+    $('#auth-error').textContent = '';
+    try {
+      await action(); // on success the sign-in listener re-renders this page
+    } catch (err) {
+      if (!view.contains($('#auth-error'))) return;
+      $('#auth-error').textContent = err.message;
+      buttons().forEach(b => { b.disabled = false; });
+    }
+  };
+  on('#google', 'click', () => attempt(signInWithGoogle));
+  on('#username-form', 'submit', e => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const create = e.submitter?.dataset.mode === 'create';
+    attempt(() => signInWithUsername(form.get('username'), form.get('passcode'), { create }));
   });
 }
 
@@ -1011,4 +1101,21 @@ loadLibrary().then(result => {
   pool = result.questions;
   byId = new Map(pool.map(q => [q.id, q]));
   render();
+  initSync({
+    getProgress: () => progress,
+    setProgress: next => {
+      if (JSON.stringify(next) === JSON.stringify(progress)) return;
+      const hadProfile = Boolean(progress.profile.mode);
+      progress = next;
+      store.saveProgress(progress);
+      if (!hadProfile && progress.profile.mode && currentRoute === 'start') return go('home');
+      // Refresh pages that only show progress; never re-render mid-question, mid-test or mid-form.
+      if (!session && ['home', 'review', 'account'].includes(currentRoute)) render();
+      else renderNav(currentRoute);
+    },
+    onChange: () => {
+      renderNav(currentRoute);
+      if (currentRoute === 'account') viewAccount();
+    },
+  });
 });

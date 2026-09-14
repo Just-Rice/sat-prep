@@ -10,16 +10,30 @@ export function defaultProgress() {
     mistakes: {},                             // see srs.js
     tests: [],                                // completed timed practice tests
     plan: { testDate: null, target: null, dailyGoal: 20 },
+    stamps: { profile: 0, placement: 0, plan: 0 },   // when each setting last changed, for cloud sync
+    resetAt: 0,                                       // when progress was last reset (see sync-core.js)
   };
 }
 
 export function loadProgress() {
   try {
     const raw = localStorage.getItem(PROGRESS_KEY);
-    return raw ? { ...defaultProgress(), ...JSON.parse(raw) } : defaultProgress();
+    return raw ? withSyncFields(JSON.parse(raw)) : defaultProgress();
   } catch {
     return defaultProgress();
   }
+}
+
+// Progress saved before cloud sync existed has no change times. Settings changed from their defaults get
+// the earliest possible time, so they win over a brand-new device but lose to any later edit.
+function withSyncFields(saved) {
+  const base = defaultProgress();
+  const progress = { ...base, ...saved };
+  if (!saved.stamps) {
+    progress.stamps = Object.fromEntries(Object.keys(base.stamps)
+      .map(key => [key, JSON.stringify(saved[key] ?? base[key]) === JSON.stringify(base[key]) ? 0 : 1]));
+  }
+  return progress;
 }
 
 export function saveProgress(progress) {
