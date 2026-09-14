@@ -42,7 +42,8 @@ createServer(async (req, res) => {
   const file = join(ROOT, path.endsWith('/') ? `${path}index.html` : path);
   try {
     const body = await readFile(file);
-    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' }).end(body);
+    // no-cache: always revalidate, so edits show up on reload and old and new files never mix.
+    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' }).end(body);
   } catch {
     res.writeHead(404).end('Not found');
   }

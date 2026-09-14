@@ -29,6 +29,9 @@ jobs:
         with:
           enablement: true
 
+      - name: Stamp the version into asset URLs
+        run: sed -i "s/__VERSION__/${GITHUB_SHA::12}/g" index.html
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:

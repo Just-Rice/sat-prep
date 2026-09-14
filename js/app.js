@@ -137,6 +137,7 @@ const ROUTES = {
 
 function render() {
   clearInterval(ticker);
+  view.removeAttribute('data-loading'); // the app started, so index.html's load-error fallback stands down
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
   const route = ROUTES[name] ? name : 'home';
   // Leaving a running test keeps its clock going; bank the time spent and highlights on the open question.

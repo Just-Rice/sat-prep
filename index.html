@@ -8,16 +8,45 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Source+Sans+3:wght@400;600;700&display=swap">
-  <link rel="stylesheet" href="css/app.css">
+  <!-- __VERSION__ becomes the commit when the site is deployed (.github/workflows/pages.yml), so a browser never
+       runs a cached file from an older version next to newer ones. List every module the app loads here. -->
+  <link rel="stylesheet" href="css/app.css?v=__VERSION__">
+  <script type="importmap">
+  {
+    "imports": {
+      "./js/adaptive.js": "./js/adaptive.js?v=__VERSION__",
+      "./js/calc.js": "./js/calc.js?v=__VERSION__",
+      "./js/demo-questions.js": "./js/demo-questions.js?v=__VERSION__",
+      "./js/firebase-config.js": "./js/firebase-config.js?v=__VERSION__",
+      "./js/irt.js": "./js/irt.js?v=__VERSION__",
+      "./js/srs.js": "./js/srs.js?v=__VERSION__",
+      "./js/store.js": "./js/store.js?v=__VERSION__",
+      "./js/sync.js": "./js/sync.js?v=__VERSION__",
+      "./js/sync-core.js": "./js/sync-core.js?v=__VERSION__",
+      "./js/taxonomy.js": "./js/taxonomy.js?v=__VERSION__"
+    }
+  }
+  </script>
+  <script>
+    // If the app can't start, say so instead of showing "Loading…" forever.
+    function showLoadError() {
+      var view = document.getElementById('view');
+      if (!view || !view.hasAttribute('data-loading')) return;
+      view.removeAttribute('data-loading');
+      view.innerHTML = '<div class="empty"><h2>SAT Prep didn\u2019t load</h2><p>Reload the page to try again.</p>'
+        + '<div class="actions"><button class="primary" type="button" onclick="location.reload()">Reload</button></div></div>';
+    }
+    window.addEventListener('error', showLoadError);
+  </script>
 </head>
 <body>
   <div class="shell">
     <aside class="side" id="side"></aside>
     <header class="topbar" id="topbar"></header>
-    <main id="view"><p class="muted">Loading…</p></main>
+    <main id="view" data-loading><p class="muted">Loading…</p></main>
   </div>
   <nav class="tabs" id="tabs" aria-label="Main"></nav>
   <div class="sheet" id="more" hidden></div>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=__VERSION__" onerror="showLoadError()"></script>
 </body>
 </html>
