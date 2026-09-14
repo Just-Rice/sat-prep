@@ -83,7 +83,9 @@ function createRenderer(doc) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+        // The print intent renders without requestAnimationFrame, which browsers pause in background
+        // tabs; with the default intent a long import stalls whenever the tab isn't visible.
+        await page.render({ canvasContext: ctx, canvas, viewport, intent: 'print' }).promise;
         return { canvas, viewport };
       })());
     }
