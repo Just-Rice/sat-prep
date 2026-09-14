@@ -1,7 +1,6 @@
 {
   "name": "sat-prep",
   "version": "1.0.0",
-  "description": "Personal, local-only SAT study tool: placement test, grade-level targeting, adaptive practice, timed practice tests, mistake review and a study dashboard.",
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js"
@@ -10,14 +9,9 @@
     "type": "git",
     "url": "git+https://github.com/Just-Rice/sat-prep.git"
   },
-  "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
-  "bugs": {
-    "url": "https://github.com/Just-Rice/sat-prep/issues"
-  },
-  "homepage": "https://github.com/Just-Rice/sat-prep#readme",
   "dependencies": {
     "pdfjs-dist": "^6.3.289"
   },
