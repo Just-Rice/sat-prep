@@ -967,9 +967,14 @@ function viewLibrary() {
     await loadPool();
     viewLibrary();
     renderNav('library');
-    $('#import-status').innerHTML = `<p>Imported ${plural(found.length, 'question')}.</p>${warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}`;
+    $('#import-status').innerHTML = `<p>Imported ${plural(found.length, 'question')}.</p>${warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}
+      ${found.length && !progress.profile.mode ? '<p><a class="button primary" href="#/start">Next: find your level</a></p>' : ''}`;
   });
-  on('#load-demo', 'click', async () => { await store.questions.putMany(DEMO_QUESTIONS); await loadPool(); render(); });
+  on('#load-demo', 'click', async () => {
+    await store.questions.putMany(DEMO_QUESTIONS);
+    await loadPool();
+    if (progress.profile.mode) render(); else go('start');
+  });
   on('#remove-demo', 'click', async () => replacePool(pool.filter(q => q.source !== 'demo')));
   confirmButton('#clear-imported', 'Click again to delete', () => replacePool(pool.filter(q => q.source === 'demo')));
   on('#desmos-form', 'submit', e => {
