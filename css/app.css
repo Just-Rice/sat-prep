@@ -110,6 +110,15 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .feedback.ok { background: var(--ok-soft); }
 .feedback.bad { background: var(--bad-soft); }
 .rationale { margin-top: 0.5rem; }
+.qimg { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 4px; }
+.prompt-image { margin-bottom: 0.9rem; }
+.choice-btn .qimg { min-width: 0; flex: 0 1 auto; }
+.answer-image .qimg, .rationale .qimg { margin-top: 0.4rem; }
+.feedback.pending { background: var(--subtle); }
+.feedback .actions { margin: 0.7rem 0 0; }
+details.original { margin-top: 0.8rem; }
+details.original summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+details.original .qimg { margin-top: 0.5rem; }
 .reasons { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.9rem; }
 .reasons span { color: var(--muted); font-size: 0.9rem; margin-right: 0.3rem; }
 

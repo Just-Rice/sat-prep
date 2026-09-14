@@ -1,10 +1,12 @@
 // Question selection: the placement test, targeted practice, and timed practice-test assembly.
 //
-// Question shape (produced by the importer):
-//   { id, section: 'RW'|'MATH', domain, skill, difficulty: 'Easy'|'Medium'|'Hard',
-//     passage?, stem, figures?: [dataUrl], choices: [{ letter, text }] | null,
-//     answer: 'B' | ['3/4', '.75'], rationale, source: 'cb-export' | 'demo' }
-// All text fields are plain text; the UI escapes them when rendering.
+// Question shape (see importer.js and demo-questions.js):
+//   { id, section: 'RW'|'MATH', domain, skill, difficulty: 'Easy'|'Medium'|'Hard', source: 'cb-export' | 'demo',
+//     passage?, stem?  or  promptImage?,
+//     choices: [{ letter, text } | { letter, image }] | null,
+//     answer: 'B' | ['3/4', '.75'] | null (typed-in answer only available as answerImage),
+//     rationale? or rationaleImage?, original? }
+// Text fields are plain text; the UI escapes them. Images are { blob, width, height }.
 
 import { DIFFICULTY_B, estimateAbility, targetDifficulty } from './irt.js';
 import { GRADE_PRIOR, skillsForGrade, skillsForSection } from './taxonomy.js';

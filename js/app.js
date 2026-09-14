@@ -87,9 +87,26 @@ function clock(ms) {
 }
 
 function snippet(q) {
-  const text = (q.passage ? `${q.passage} ` : '') + q.stem;
+  const text = [q.passage, q.stem].filter(Boolean).join(' ');
+  if (!text) return `Question ${q.cbId ?? q.id}`;
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
+
+// Imported questions keep math, graphs and tables as images cut from the export (see importer.js).
+const imageUrls = new WeakMap();
+function imgHtml(image, alt) {
+  if (!image?.blob) return '';
+  let url = imageUrls.get(image.blob);
+  if (!url) {
+    url = URL.createObjectURL(image.blob);
+    imageUrls.set(image.blob, url);
+  }
+  return `<img class="qimg" src="${url}" alt="${esc(alt)}" width="${image.width}" height="${image.height}">`;
+}
+
+// A typed-in answer drawn as math in the export can't be checked automatically; the student compares
+// their answer with the image and marks it. Placement and timed tests only use gradable questions.
+const gradable = q => q.answer != null;
 
 function answerText(q) {
   return Array.isArray(q.answer) ? q.answer.join(' or ') : q.answer;
@@ -143,9 +160,15 @@ function renderNav(active) {
 // ---------- shared question rendering ----------
 
 function questionHtml(q, st = {}) {
-  const passage = q.passage || st.passageHtml
-    ? `<div class="passage">${st.passageHtml ?? para(q.passage)}</div>` : '';
-  const figures = (q.figures || []).map(src => `<img class="figure" src="${esc(src)}" alt="Figure for this question">`).join('');
+  let prompt;
+  if (q.promptImage) {
+    prompt = `<div class="prompt-image">${imgHtml(q.promptImage, 'The question, as shown in the College Board export')}</div>`;
+  } else {
+    const passage = q.passage || st.passageHtml
+      ? `<div class="passage">${st.passageHtml ?? para(q.passage)}</div>` : '';
+    const figures = (q.figures || []).map(src => `<img class="figure" src="${esc(src)}" alt="Figure for this question">`).join('');
+    prompt = `${passage}${figures}<div class="stem">${para(q.stem)}</div>`;
+  }
   let answer;
   if (q.choices) {
     answer = `<ol class="choices">${q.choices.map(c => {
@@ -156,7 +179,7 @@ function questionHtml(q, st = {}) {
         st.revealed && st.selected === c.letter && c.letter !== q.answer && 'wrong',
       ].filter(Boolean).join(' ');
       return `<li class="${cls}" data-letter="${c.letter}">
-        <button class="choice-btn" data-choice="${c.letter}" ${st.revealed ? 'disabled' : ''}><span class="letter">${c.letter}</span><span>${inline(c.text)}</span></button>
+        <button class="choice-btn" data-choice="${c.letter}" ${st.revealed ? 'disabled' : ''}><span class="letter">${c.letter}</span>${c.image ? imgHtml(c.image, `Choice ${c.letter}`) : `<span>${inline(c.text)}</span>`}</button>
         ${st.tools ? `<button class="strike" data-strike="${c.letter}" title="Cross out choice ${c.letter}" aria-label="Cross out choice ${c.letter}">✕</button>` : ''}
       </li>`;
     }).join('')}</ol>`;
@@ -165,13 +188,22 @@ function questionHtml(q, st = {}) {
       <input data-spr value="${esc(st.selected ?? '')}" ${st.revealed ? 'disabled' : ''} autocomplete="off" spellcheck="false" placeholder="e.g. 12, 3/4, -2.5">
     </label>`;
   }
-  const feedback = st.revealed ? `
-    <div class="feedback ${st.correct ? 'ok' : 'bad'}">
-      <strong>${st.correct ? 'Correct.' : 'Not quite.'}</strong> The answer is ${esc(answerText(q))}.
-      ${q.rationale ? `<div class="rationale">${para(q.rationale)}</div>` : ''}
-    </div>` : '';
+  let feedback = '';
+  if (st.revealed) {
+    const key = gradable(q)
+      ? `The answer is ${esc(answerText(q))}.`
+      : `<div class="answer-image">The correct answer: ${imgHtml(q.answerImage, 'The correct answer')}</div>`;
+    const rationale = q.rationaleImage ? imgHtml(q.rationaleImage, 'Explanation') : q.rationale ? para(q.rationale) : '';
+    feedback = st.correct == null
+      ? `<div class="feedback pending"><strong>Compare your answer.</strong> ${key}
+          <div class="actions"><button class="primary" data-self="1">I got it right</button><button data-self="0">I got it wrong</button></div></div>`
+      : `<div class="feedback ${st.correct ? 'ok' : 'bad'}"><strong>${st.correct ? 'Correct.' : 'Not quite.'}</strong> ${key}
+          ${rationale ? `<div class="rationale">${rationale}</div>` : ''}</div>`;
+  }
+  const original = st.revealed && q.original
+    ? `<details class="original"><summary>View the original from the export</summary>${imgHtml(q.original, 'The original question')}</details>` : '';
   const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(q.skill)} · ${esc(q.difficulty)}${q.source === 'demo' ? ' · demo' : ''}</div>`;
-  return `<article class="question">${meta}${passage}${figures}<div class="stem">${para(q.stem)}</div>${answer}${feedback}</article>`;
+  return `<article class="question">${meta}${prompt}${answer}${feedback}${original}</article>`;
 }
 
 // Wires up choice selection, crossing out and typed answers without re-rendering (so highlights survive).
@@ -202,8 +234,8 @@ function bindAnswerInputs(onChange, eliminated) {
   }
 }
 
-function record(q, choice, source, ms) {
-  const correct = isCorrect(q, choice);
+function record(q, choice, source, ms, selfMarked) {
+  const correct = selfMarked ?? isCorrect(q, choice);
   progress.responses.push({
     qid: q.id, section: q.section, domain: q.domain, skill: q.skill, b: DIFFICULTY_B[q.difficulty] ?? 0,
     correct, choice: choice ?? null, ms, at: Date.now(), source,
@@ -229,26 +261,34 @@ function bindReasonPicker(qid) {
   });
 }
 
-const newDrillState = () => ({ selected: null, eliminated: new Set(), revealed: false, correct: false, shownAt: Date.now() });
+const newDrillState = () => ({ selected: null, eliminated: new Set(), revealed: false, correct: null, shownAt: Date.now() });
 
 // One-question-at-a-time flow with instant feedback, shared by practice and review.
 function renderDrill(headerHtml, source, rerender) {
   const { q, st } = session;
+  const awaitingSelfMark = st.revealed && st.correct == null;
   view.innerHTML = `${headerHtml}
     ${questionHtml(q, { ...st, tools: !st.revealed })}
-    ${st.revealed && !st.correct ? reasonPicker(q.id) : ''}
-    <div class="actions">${st.revealed
-      ? '<button class="primary" id="next">Next question</button>'
+    ${st.correct === false ? reasonPicker(q.id) : ''}
+    <div class="actions">${awaitingSelfMark ? ''
+      : st.revealed ? '<button class="primary" id="next">Next question</button>'
       : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>`}</div>`;
+
+  const finish = correct => {
+    st.correct = record(q, st.selected, source, Date.now() - st.shownAt, correct);
+    session.done++;
+    if (st.correct) session.correct++;
+  };
+
   if (!st.revealed) {
     bindAnswerInputs(v => { st.selected = v; $('#check').disabled = v == null; }, st.eliminated);
     on('#check', 'click', () => {
-      st.correct = record(q, st.selected, source, Date.now() - st.shownAt);
       st.revealed = true;
-      session.done++;
-      if (st.correct) session.correct++;
+      if (gradable(q)) finish();
       rerender();
     });
+  } else if (awaitingSelfMark) {
+    on('[data-self]', 'click', e => { finish(e.currentTarget.dataset.self === '1'); rerender(); });
   } else {
     bindReasonPicker(q.id);
     on('#next', 'click', () => { session.q = null; rerender(); });
@@ -299,7 +339,7 @@ function viewPlacement(arg) {
     session = { kind: 'placement', section, answered: [], q: null };
   }
   if (!session.q) {
-    const step = nextPlacementQuestion(pool, session.answered, section);
+    const step = nextPlacementQuestion(pool.filter(gradable), session.answered, section);
     if (step.done) return finishPlacement(section, step.estimate);
     session.q = step.question;
     session.st = newDrillState();
@@ -474,9 +514,10 @@ function startModule() {
   const s = session;
   const section = s.sections[s.sIdx];
   const seen = new Set(progress.responses.map(r => r.qid));
-  const unseen = pool.filter(q => !seen.has(q.id));
+  const usable = pool.filter(gradable);
+  const unseen = usable.filter(q => !seen.has(q.id));
   const enoughUnseen = unseen.filter(q => q.section === section).length >= TEST_FORMAT[section].perModule * 2;
-  const questions = buildModule(enoughUnseen ? unseen : pool, section, s.module === 1 ? null : s.route, s.used);
+  const questions = buildModule(enoughUnseen ? unseen : usable, section, s.module === 1 ? null : s.route, s.used);
   questions.forEach(q => s.used.add(q.id));
   Object.assign(s, { section, questions, idx: 0, answers: {}, eliminated: {}, flags: new Set(), highlights: {}, times: {}, reviewScreen: false, gridOpen: false, highlightMode: false });
 }
@@ -951,7 +992,7 @@ function viewLibrary() {
       for (const file of files) {
         status.textContent = `Reading ${file.name}…`;
         try {
-          const result = await importPdf(file);
+          const result = await importPdf(file, message => { status.textContent = message; });
           found.push(...result.questions);
           warnings.push(...result.warnings);
         } catch (err) {
