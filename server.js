@@ -26,8 +26,16 @@ try {
 }
 
 createServer(async (req, res) => {
-  const path = normalize(decodeURIComponent(new URL(req.url, 'http://localhost').pathname));
-  if (path.includes('..') || path.startsWith('/.') || PRIVATE.some(p => path === p || path.startsWith(`${p}/`))) {
+  let path;
+  try {
+    path = normalize(decodeURIComponent(new URL(req.url, 'http://localhost').pathname));
+  } catch {
+    res.writeHead(400).end(); // a malformed escape like %E0 would otherwise crash the server
+    return;
+  }
+  // File names on macOS are case-insensitive, so /EXPORTS has to be refused along with /exports.
+  const lower = path.toLowerCase();
+  if (lower.includes('..') || lower.startsWith('/.') || PRIVATE.some(p => lower === p || lower.startsWith(`${p}/`))) {
     res.writeHead(404).end();
     return;
   }

@@ -23,15 +23,19 @@ function loadDesmos(key) {
   return desmosLoad;
 }
 
-export async function mountCalculator(container) {
+// isCurrent reports whether the calculator is still wanted once Desmos finishes loading; the student may
+// have switched to the reference sheet in the meantime.
+export async function mountCalculator(container, isCurrent = () => true) {
   const key = getDesmosKey();
   if (key) {
     try {
       const Desmos = await loadDesmos(key);
+      if (!isCurrent()) return;
       container.innerHTML = '<div class="desmos"></div>';
       Desmos.GraphingCalculator(container.firstChild, { expressionsCollapsed: false });
       return;
     } catch { /* fall through to the built-in calculator */ }
+    if (!isCurrent()) return;
   }
   mountScientific(container, key ? 'Desmos could not load, so the built-in calculator is shown.' : 'Add a Desmos API key in Library → Settings to use the graphing calculator.');
 }

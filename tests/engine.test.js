@@ -125,3 +125,21 @@ test('calculator evaluates expressions safely', () => {
   assert.ok(Math.abs(evaluate('sin(pi/6)', { degrees: false }) - 0.5) < 1e-12);
   assert.throws(() => evaluate('alert(1)'));
 });
+
+test('timed modules can be built smaller for a small library', () => {
+  const math = DEMO_QUESTIONS.filter(q => q.section === 'MATH');
+  const size = Math.ceil(math.length / 2);
+  const first = buildModule(DEMO_QUESTIONS, 'MATH', null, new Set(), size);
+  assert.equal(first.length, size);
+  const second = buildModule(DEMO_QUESTIONS, 'MATH', 'hard', new Set(first.map(q => q.id)), size);
+  assert.equal(second.length, math.length - size);
+  assert.ok(second.every(q => !first.includes(q)));
+});
+
+test('a skill the student picks is served even above their grade', () => {
+  const progress = { ...blankProgress(), profile: { mode: 'grade', grade: 8 } };
+  const advanced = DEMO_QUESTIONS.find(q => q.section === 'MATH' && findSkill(q.skill).minGrade > 8);
+  assert.ok(advanced, 'demo pool has a skill above grade 8');
+  const q = nextPracticeQuestion(DEMO_QUESTIONS, progress, 'MATH', { skill: advanced.skill });
+  assert.equal(q?.skill, advanced.skill);
+});

@@ -1,6 +1,6 @@
 // Question selection: the placement test, targeted practice, and timed practice-test assembly.
 //
-// Question shape (see importer.js and demo-questions.js):
+// Question shape (see scripts/build-questions.js and demo-questions.js):
 //   { id, section: 'RW'|'MATH', domain, skill, difficulty: 'Easy'|'Medium'|'Hard', source: 'cb-export' | 'demo',
 //     passage?, stem?  or  promptImage?,
 //     choices: [{ letter, text } | { letter, image }] | null,
@@ -73,6 +73,7 @@ export function nextPlacementQuestion(pool, answered, section) {
 export function nextPracticeQuestion(pool, progress, section, { skill } = {}) {
   const grade = progress.profile.mode === 'grade' && !progress.placement[section] ? progress.profile.grade : null;
   const allowed = new Set((grade ? skillsForGrade(section, grade) : skillsForSection(section)).map(s => s.name));
+  if (skill) allowed.add(skill); // a skill the student picks themselves is served regardless of grade
   const abilities = skillAbilities(progress, section).filter(s => allowed.has(s.name));
 
   const lastSeen = new Map(progress.responses.map(r => [r.qid, r.at]));
@@ -99,14 +100,13 @@ export function nextPracticeQuestion(pool, progress, section, { skill } = {}) {
 // not publish its routing rule, so the threshold here is an approximation.
 export const ROUTING_THRESHOLD = 0.6;
 
-export function buildModule(pool, section, route, exclude = new Set()) {
-  const { perModule } = TEST_FORMAT[section];
+export function buildModule(pool, section, route, exclude = new Set(), size = TEST_FORMAT[section].perModule) {
   const mix = route === 'hard' ? { Easy: 0.15, Medium: 0.4, Hard: 0.45 }
     : route === 'easy' ? { Easy: 0.45, Medium: 0.4, Hard: 0.15 }
     : { Easy: 0.33, Medium: 0.34, Hard: 0.33 };
   const picked = [];
   for (const [domain, share] of Object.entries(DOMAIN_SHARE[section])) {
-    const want = Math.round(share * perModule);
+    const want = Math.round(share * size);
     const inDomain = shuffle(pool.filter(q => q.section === section && q.domain === domain && !exclude.has(q.id)));
     for (const [difficulty, frac] of Object.entries(mix)) {
       picked.push(...inDomain.filter(q => q.difficulty === difficulty).slice(0, Math.round(want * frac)));
@@ -115,7 +115,7 @@ export function buildModule(pool, section, route, exclude = new Set()) {
   // Fill any shortfall (small imports, rounding) from whatever remains.
   const used = new Set(picked.map(q => q.id));
   const rest = shuffle(pool.filter(q => q.section === section && !exclude.has(q.id) && !used.has(q.id)));
-  const module = [...picked, ...rest].slice(0, perModule);
+  const module = [...picked, ...rest].slice(0, size);
   // Order roughly easy to hard within each domain block, like the real test.
   return module.sort((a, c) => domainOrder(section, a) - domainOrder(section, c) || b(a) - b(c));
 }

@@ -18,7 +18,9 @@ let progress = store.loadProgress();
 let pool = [];
 let byId = new Map();
 let library = { source: 'demo', files: 0, warnings: [] };
-let session = null;   // the active placement, practice, review or test session
+let session = null;   // the active placement, practice or review session
+let test = null;      // the timed practice test, kept separately so browsing other pages doesn't end it
+let currentRoute = null;
 let ticker = null;
 
 // ---------- helpers ----------
@@ -125,21 +127,24 @@ function render() {
   clearInterval(ticker);
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
   const route = ROUTES[name] ? name : 'home';
+  // Leaving a running test keeps its clock going; bank the time spent and highlights on the open question.
+  if (currentRoute === 'test' && route !== 'test' && test && !test.finished && !test.onBreak) leaveQuestion();
+  currentRoute = route;
   if (!pool.length && route !== 'library') return go('library');
   if (!progress.profile.mode && !['library', 'start', 'placement', 'placed'].includes(route)) return go('start');
-  if (session && !sessionBelongsTo(route)) session = session.kind === 'test' ? session : null;
+  if (session && !sessionBelongsTo(route)) session = null;
   renderNav(route);
   window.scrollTo(0, 0);
   ROUTES[route](arg);
 }
 
 function sessionBelongsTo(route) {
-  return { placement: 'placement', practice: 'practice', review: 'review', test: 'test' }[route] === session.kind;
+  return { placement: 'placement', practice: 'practice', review: 'review' }[route] === session.kind;
 }
 
 function renderNav(active) {
   const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
-  const testRunning = session?.kind === 'test' && !session.finished;
+  const testRunning = test && !test.finished;
   const links = [
     ['home', 'Dashboard'], ['practice', 'Practice'], ['test', testRunning ? 'Practice test ●' : 'Practice test'],
     ['review', `Review${due ? ` <span class="badge">${due}</span>` : ''}`], ['plan', 'Study plan'], ['library', 'Library'],
@@ -281,7 +286,7 @@ function renderDrill(headerHtml, source, rerender) {
     on('[data-self]', 'click', e => { finish(e.currentTarget.dataset.self === '1'); rerender(); });
   } else {
     bindReasonPicker(q.id);
-    on('#next', 'click', () => { session.q = null; rerender(); });
+    on('#next', 'click', () => { session.q = null; rerender(); window.scrollTo(0, 0); });
     $('#next').focus();
   }
 }
@@ -318,6 +323,7 @@ function viewStart() {
   });
   on('#use-grade', 'click', () => {
     progress.profile = { mode: 'grade', grade: Number($('#grade').value) };
+    progress.placement = { RW: null, MATH: null };
     save();
     go('home');
   });
@@ -349,6 +355,7 @@ function viewPlacement(arg) {
     session.answered.push({ qid: q.id, domain: q.domain, b: DIFFICULTY_B[q.difficulty] ?? 0, correct });
     session.q = null;
     viewPlacement(section);
+    window.scrollTo(0, 0);
   });
   on('#skip', 'click', () => finishPlacement(section, session.answered.length ? estimateAbility(session.answered) : null));
 }
@@ -368,7 +375,8 @@ function viewPlaced() {
     view.innerHTML = `<div class="empty"><h2>No placement results</h2><p>Both sections were skipped. Choose a grade instead, or retake the placement test.</p><a class="button primary" href="#/start">Back</a></div>`;
     return;
   }
-  const answers = progress.responses.filter(r => r.source === 'placement');
+  const answers = placed.flatMap(s => progress.responses
+    .filter(r => r.source === 'placement' && r.section === s).slice(-progress.placement[s].items));
   const byDomain = DOMAINS.map(d => {
     const rs = answers.filter(r => r.domain === d.name);
     return { d, correct: rs.filter(r => r.correct).length, total: rs.length };
@@ -395,7 +403,7 @@ function viewPlaced() {
 function viewPractice(arg) {
   const section = SECTIONS[arg] ? arg : session?.kind === 'practice' ? session.section : 'MATH';
   if (session?.kind !== 'practice' || session.section !== section) {
-    session = { kind: 'practice', section, skill: session?.pendingSkill || '', done: 0, correct: 0, q: null };
+    session = { kind: 'practice', section, skill: '', done: 0, correct: 0, q: null };
   }
   if (!session.q) {
     session.q = nextPracticeQuestion(pool, progress, section, { skill: session.skill || undefined });
@@ -472,20 +480,21 @@ function reviewSession() {
 // ---------- timed practice test ----------
 
 function viewTest() {
-  if (session?.kind === 'test') {
-    if (session.finished) return testResults();
-    if (session.onBreak) return moduleBreak();
+  if (test) {
+    if (test.finished) return testResults();
+    if (test.onBreak) return moduleBreak();
     return testScreen();
   }
   const sizes = { RW: TEST_FORMAT.RW.perModule * 2, MATH: TEST_FORMAT.MATH.perModule * 2 };
+  const usable = { RW: testableCount('RW'), MATH: testableCount('MATH') };
   view.innerHTML = `
     <h1>Timed practice test</h1>
     <p>Built like the digital SAT. Each section has two modules. Module 1 mixes easy, medium and hard questions, and how you do on it decides whether module 2 is harder or easier. Reading and Writing modules are ${TEST_FORMAT.RW.perModule} questions in ${TEST_FORMAT.RW.minutes} minutes; Math modules are ${TEST_FORMAT.MATH.perModule} questions in ${TEST_FORMAT.MATH.minutes} minutes.</p>
     <div class="cards">
       ${[['FULL', 'Full test', 'Reading and Writing, then Math', '2 hr 14 min'], ['RW', 'Reading and Writing', 'Two modules', '64 min'], ['MATH', 'Math', 'Two modules', '70 min']].map(([k, title, sub, time]) => `
-        <div class="card"><h2>${title}</h2><p class="muted">${sub} · ${time}</p><button class="primary" data-test="${k}">Start</button></div>`).join('')}
+        <div class="card"><h2>${title}</h2><p class="muted">${sub} · ${time}</p><button class="primary" data-test="${k}" ${(k === 'FULL' ? ['RW', 'MATH'] : [k]).every(sec => usable[sec]) ? '' : 'disabled'}>Start</button></div>`).join('')}
     </div>
-    ${sectionCount('RW') < sizes.RW || sectionCount('MATH') < sizes.MATH ? `<p class="note">A full-length section needs ${sizes.RW} Reading and Writing or ${sizes.MATH} Math questions. You have ${sectionCount('RW')} and ${sectionCount('MATH')}, so modules will be shorter until you add more exports.</p>` : ''}
+    ${usable.RW < sizes.RW || usable.MATH < sizes.MATH ? `<p class="note">A full-length section needs ${sizes.RW} Reading and Writing or ${sizes.MATH} Math questions that can be scored automatically. You have ${usable.RW} and ${usable.MATH}, so modules will be shorter until you add more exports.</p>` : ''}
     ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table>
       <thead><tr><th>Date</th><th>Test</th><th>Reading and Writing</th><th>Math</th></tr></thead>
       <tbody>${[...progress.tests].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td>${esc(t.kind)}</td>
@@ -494,35 +503,41 @@ function viewTest() {
   on('[data-test]', 'click', e => startTest(e.currentTarget.dataset.test));
 }
 
+const testableCount = section => pool.filter(q => q.section === section && gradable(q)).length;
+
 function startTest(kind) {
-  session = { kind: 'test', sections: kind === 'FULL' ? ['RW', 'MATH'] : [kind], sIdx: 0, module: 1, route: null, used: new Set(), results: [], panel: null, hideTimer: false };
+  test = {
+    sections: kind === 'FULL' ? ['RW', 'MATH'] : [kind], sIdx: 0, module: 1, route: null, used: new Set(), results: [],
+    panel: null, hideTimer: false, seenBefore: new Set(progress.responses.map(r => r.qid)),
+  };
   startModule();
   beginModule();
 }
 
 function startModule() {
-  const s = session;
+  const s = test;
   const section = s.sections[s.sIdx];
-  const seen = new Set(progress.responses.map(r => r.qid));
-  const usable = pool.filter(gradable);
-  const unseen = usable.filter(q => !seen.has(q.id));
-  const enoughUnseen = unseen.filter(q => q.section === section).length >= TEST_FORMAT[section].perModule * 2;
-  const questions = buildModule(enoughUnseen ? unseen : usable, section, s.module === 1 ? null : s.route, s.used);
+  const usable = pool.filter(q => q.section === section && gradable(q));
+  // A small library is split between the two modules, so module 2 still has questions to be routed to.
+  const size = Math.min(TEST_FORMAT[section].perModule, Math.ceil(usable.length / 2));
+  // Prefer questions not seen before this test, decided the same way for both modules.
+  const unseen = usable.filter(q => !s.seenBefore.has(q.id));
+  const source = unseen.length >= size * 2 ? unseen : usable;
+  const questions = buildModule(source, section, s.module === 1 ? null : s.route, s.used, size);
   questions.forEach(q => s.used.add(q.id));
   Object.assign(s, { section, questions, idx: 0, answers: {}, eliminated: {}, flags: new Set(), highlights: {}, times: {}, reviewScreen: false, gridOpen: false, highlightMode: false });
 }
 
 function beginModule() {
-  const s = session;
+  const s = test;
   s.onBreak = false;
   s.endsAt = Date.now() + TEST_FORMAT[s.section].minutes * 60 * 1000;
-  s.shownAt = Date.now();
   renderNav('test');
   testScreen();
 }
 
 function testScreen() {
-  const s = session;
+  const s = test;
   const short = s.questions.length < TEST_FORMAT[s.section].perModule;
   view.innerHTML = `
     <div class="test ${s.highlightMode ? 'highlighting' : ''}">
@@ -557,14 +572,16 @@ function testScreen() {
     drawPanel();
   });
   drawPanel();
-  tick();
-  ticker = setInterval(tick, 1000);
+  s.shownAt = Date.now();
   drawQuestion();
+  // Draw first: if time ran out while the student was on another page, tick submits the module right away.
+  ticker = setInterval(tick, 1000);
+  tick();
 }
 
 function tick() {
-  if (session?.kind !== 'test' || session.finished || session.onBreak) return clearInterval(ticker);
-  const left = session.endsAt - Date.now();
+  if (!test || test.finished || test.onBreak) return clearInterval(ticker);
+  const left = test.endsAt - Date.now();
   const timer = document.getElementById('timer');
   if (timer) {
     timer.textContent = clock(left);
@@ -576,14 +593,14 @@ function tick() {
 function drawPanel() {
   const panel = $('#panel');
   if (!panel) return;
-  panel.hidden = !session.panel;
-  if (session.panel === 'calc') mountCalculator(panel);
-  else if (session.panel === 'ref') panel.innerHTML = REFERENCE_SHEET;
+  panel.hidden = !test.panel;
+  if (test.panel === 'calc') mountCalculator(panel, () => test?.panel === 'calc' && panel.isConnected);
+  else if (test.panel === 'ref') panel.innerHTML = REFERENCE_SHEET;
   else panel.innerHTML = '';
 }
 
 function leaveQuestion() {
-  const s = session;
+  const s = test;
   const q = s.questions[s.idx];
   if (s.reviewScreen || !q) return;
   s.times[q.id] = (s.times[q.id] || 0) + Date.now() - s.shownAt;
@@ -593,13 +610,13 @@ function leaveQuestion() {
 
 function goToQuestion(i) {
   leaveQuestion();
-  Object.assign(session, { idx: i, reviewScreen: false, gridOpen: false, shownAt: Date.now() });
+  Object.assign(test, { idx: i, reviewScreen: false, gridOpen: false, shownAt: Date.now() });
   drawQuestion();
   window.scrollTo(0, 0);
 }
 
 function drawQuestion() {
-  const s = session;
+  const s = test;
   const tq = $('#tq');
   if (s.reviewScreen) {
     const unanswered = s.questions.filter(q => s.answers[q.id] == null).length;
@@ -651,7 +668,7 @@ function drawQuestion() {
 }
 
 function gridHtml() {
-  const s = session;
+  const s = test;
   return `<div class="grid" role="navigation" aria-label="Questions">${s.questions.map((q, i) => {
     const cls = [s.answers[q.id] != null && 'answered', s.flags.has(q.id) && 'flagged', !s.reviewScreen && i === s.idx && 'current'].filter(Boolean).join(' ');
     return `<button class="${cls}" data-goto="${i}">${i + 1}</button>`;
@@ -666,7 +683,7 @@ function bindHighlighter() {
   const passage = view.querySelector('.passage');
   if (!passage) return;
   passage.addEventListener('mouseup', () => {
-    if (!session.highlightMode) return;
+    if (!test.highlightMode) return;
     const sel = window.getSelection();
     if (!sel.rangeCount || sel.isCollapsed) return;
     const range = sel.getRangeAt(0);
@@ -679,13 +696,13 @@ function bindHighlighter() {
     sel.removeAllRanges();
   });
   passage.addEventListener('click', e => {
-    if (session.highlightMode && e.target.tagName === 'MARK') e.target.replaceWith(...e.target.childNodes);
+    if (test.highlightMode && e.target.tagName === 'MARK') e.target.replaceWith(...e.target.childNodes);
   });
 }
 
 function submitModule() {
-  const s = session;
-  if (s?.kind !== 'test' || s.finished || s.onBreak) return;
+  const s = test;
+  if (!s || s.finished || s.onBreak) return;
   clearInterval(ticker);
   leaveQuestion();
   const responses = s.questions.map(q => {
@@ -711,7 +728,7 @@ function submitModule() {
 }
 
 function moduleBreak() {
-  const s = session;
+  const s = test;
   const nextLabel = `${SECTIONS[s.section].name}, module ${s.module}`;
   const newSection = s.module === 1;
   view.innerHTML = `<div class="empty">
@@ -723,7 +740,7 @@ function moduleBreak() {
 }
 
 function finishTest() {
-  const s = session;
+  const s = test;
   const summary = {};
   for (const section of s.sections) {
     const rs = s.results.filter(r => r.section === section).flatMap(r => r.responses);
@@ -747,7 +764,7 @@ function finishTest() {
 }
 
 function testResults() {
-  const s = session;
+  const s = test;
   const { summary } = s.record;
   const all = s.results.flatMap(r => r.responses.map(x => ({ ...x, section: r.section, module: r.module })));
   const domainRows = DOMAINS.map(d => {
@@ -773,7 +790,7 @@ function testResults() {
         ${questionHtml(q, { selected: r.choice, revealed: true, correct: r.correct, hideMeta: true })}</details>`;
     }).join('')}
     <div class="actions"><button class="primary" id="done">Done</button></div>`;
-  on('#done', 'click', () => { session = null; go('home'); });
+  on('#done', 'click', () => { test = null; go('home'); });
 }
 
 const REFERENCE_SHEET = `<div class="ref"><h3>Formulas</h3><p class="hint">Modeled on the SAT math reference sheet.</p><dl>
@@ -789,7 +806,7 @@ const REFERENCE_SHEET = `<div class="ref"><h3>Formulas</h3><p class="hint">Model
 // ---------- dashboard ----------
 
 function viewHome() {
-  session = session?.kind === 'test' && !session.finished ? session : null;
+  if (test?.finished) test = null;
   const est = { RW: sectionEstimate('RW'), MATH: sectionEstimate('MATH') };
   const total = projectedTotal();
   const today = answeredToday();
@@ -964,6 +981,7 @@ function viewLibrary() {
     progress = store.defaultProgress();
     save();
     session = null;
+    test = null;
     go('start');
   });
 }

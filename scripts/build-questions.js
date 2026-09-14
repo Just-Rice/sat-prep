@@ -47,7 +47,13 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
     if (result && !result.questions.flatMap(imagesOf).every(img => existsSync(join(imagesDir, fileOf(img))))) result = null;
     if (!result) {
       log(`Building questions from ${file}…`);
-      result = await buildFile(bytes, file, imagesDir);
+      try {
+        result = await buildFile(bytes, file, imagesDir);
+      } catch (err) {
+        // A damaged or half-downloaded PDF shouldn't keep the rest of the library from building.
+        warnings.push(`${file}: could not be read (${err.message}). Is it a complete College Board Question Bank export?`);
+        continue;
+      }
       await writeFile(cachePath, JSON.stringify(result));
     }
     warnings.push(...result.warnings);
