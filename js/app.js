@@ -553,8 +553,8 @@ function drawPanel() {
 
 function leaveQuestion() {
   const s = session;
-  if (s.reviewScreen) return;
   const q = s.questions[s.idx];
+  if (s.reviewScreen || !q) return;
   s.times[q.id] = (s.times[q.id] || 0) + Date.now() - s.shownAt;
   const passage = view.querySelector('.passage');
   if (passage) s.highlights[q.id] = passage.innerHTML;
@@ -673,10 +673,8 @@ function submitModule() {
   }
   if (s.sIdx >= s.sections.length) return finishTest();
   startModule();
-  if (!s.questions.length) {
-    s.results.push({ section: s.section, module: s.module, route: s.route, responses: [] });
-    return submitModule();
-  }
+  // Too few questions left for this module (a small library): skip straight past it.
+  if (!s.questions.length) return submitModule();
   s.onBreak = true;
   moduleBreak();
 }
@@ -702,7 +700,7 @@ function finishTest() {
     summary[section] = {
       correct: rs.filter(r => r.correct).length,
       total: rs.length,
-      route: s.results.find(r => r.section === section && r.module === 2)?.route ?? null,
+      route: s.results.find(r => r.section === section && r.module === 2 && r.responses.length)?.route ?? null,
       score: projectSectionScore(estimateAbility(rs)),
     };
   }
@@ -730,7 +728,7 @@ function testResults() {
     <div class="cards">
       ${Object.entries(summary).map(([sec, x]) => `<div class="card"><div class="eyebrow">${SECTIONS[sec].name}</div>
         <div class="big">${x.score.mid}</div><div class="range">likely ${x.score.low}–${x.score.high}</div>
-        <p class="muted">${x.correct} of ${x.total} correct${x.route ? ` · module 2 was the ${x.route}er module` : ''}</p></div>`).join('')}
+        <p class="muted">${x.correct} of ${x.total} correct${x.route ? ` · you were routed to the ${x.route === 'hard' ? 'harder' : 'easier'} module 2` : ''}</p></div>`).join('')}
       ${summary.RW && summary.MATH ? `<div class="card"><div class="eyebrow">Estimated total</div><div class="big">${summary.RW.score.mid + summary.MATH.score.mid}</div><div class="range">likely ${summary.RW.score.low + summary.MATH.score.low}–${summary.RW.score.high + summary.MATH.score.high}</div></div>` : ''}
     </div>
     <div class="card"><h2>By domain</h2><div class="table-wrap"><table><tbody>${domainRows}</tbody></table></div></div>
