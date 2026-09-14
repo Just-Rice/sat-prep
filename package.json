@@ -1,6 +1,7 @@
 {
   "name": "sat-prep",
   "version": "1.0.0",
+  "description": "Adaptive SAT study app: placement testing, targeted practice, timed digital-SAT-style practice tests, mistake review with spaced repetition, and a study dashboard.",
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
@@ -10,6 +11,11 @@
     "type": "git",
     "url": "git+https://github.com/Just-Rice/sat-prep.git"
   },
+  "homepage": "https://just-rice.github.io/sat-prep/",
+  "bugs": {
+    "url": "https://github.com/Just-Rice/sat-prep/issues"
+  },
+  "keywords": ["sat", "sat-prep", "adaptive-learning", "education"],
   "author": "",
   "license": "ISC",
   "type": "module",
