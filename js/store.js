@@ -1,11 +1,14 @@
-// The student's progress, kept in localStorage. Nothing leaves the device.
+// The student's progress, kept in localStorage with one copy per test (SAT, PSAT/NMSQT, PSAT 8/9, ACT). Nothing
+// leaves the device unless cloud sync is on.
 
-const PROGRESS_KEY = 'satprep.progress.v1';
+// The SAT keeps the key it had before other tests existed, so earlier progress carries over.
+const keyFor = exam => (exam === 'sat' ? 'satprep.progress.v1' : `satprep.progress.${exam}.v1`);
+const EXAM_KEY = 'satprep.exam';
 
 export function defaultProgress() {
   return {
     profile: { mode: null, grade: null },   // mode: 'placement' | 'grade'
-    placement: { RW: null, MATH: null },      // { theta, se, finishedAt }
+    placement: {},                            // section id → { theta, se, items, finishedAt }
     responses: [],                            // { qid, section, skill, b, correct, choice, ms, at, source }
     mistakes: {},                             // see srs.js
     tests: [],                                // completed timed practice tests
@@ -15,9 +18,15 @@ export function defaultProgress() {
   };
 }
 
-export function loadProgress() {
+// True for progress nobody has touched yet, which cloud sync doesn't need to store.
+export function isPristine(progress) {
+  return !progress.responses?.length && !Object.keys(progress.mistakes || {}).length && !progress.tests?.length
+    && !progress.resetAt && Object.values(progress.stamps || {}).every(time => !time);
+}
+
+export function loadProgress(exam = 'sat') {
   try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
+    const raw = localStorage.getItem(keyFor(exam));
     return raw ? withSyncFields(JSON.parse(raw)) : defaultProgress();
   } catch {
     return defaultProgress();
@@ -33,13 +42,28 @@ function withSyncFields(saved) {
     progress.stamps = Object.fromEntries(Object.keys(base.stamps)
       .map(key => [key, JSON.stringify(saved[key] ?? base[key]) === JSON.stringify(base[key]) ? 0 : 1]));
   }
+  // Older SAT progress stored placement as { RW: null, MATH: null }; empty sections are simply absent now.
+  progress.placement = Object.fromEntries(Object.entries(progress.placement || {}).filter(([, result]) => result));
   return progress;
 }
 
-export function saveProgress(progress) {
+export function saveProgress(progress, exam = 'sat') {
   try {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+    localStorage.setItem(keyFor(exam), JSON.stringify(progress));
   } catch (err) {
     console.warn('Could not save progress', err);
   }
+}
+
+export function loadExam(ids) {
+  try {
+    const saved = localStorage.getItem(EXAM_KEY);
+    return ids.includes(saved) ? saved : ids[0];
+  } catch {
+    return ids[0];
+  }
+}
+
+export function saveExam(id) {
+  try { localStorage.setItem(EXAM_KEY, id); } catch { /* storage unavailable */ }
 }

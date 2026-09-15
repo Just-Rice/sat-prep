@@ -135,3 +135,12 @@ test('a routine push writes only the documents that changed', async () => {
   await syncProgress(cloud.backend, progress, known);
   assert.deepEqual(cloud.writes, [], 'nothing to write when nothing changed');
 });
+
+test('a test nobody has used is never written to the cloud', async () => {
+  const cloud = memoryCloud();
+  const progress = await syncProgress(cloud.backend, defaultProgress(), {}, { full: true });
+  assert.equal(cloud.writes.length, 0);
+  assert.deepEqual(progress.responses, []);
+  await syncProgress(cloud.backend, { ...progress, responses: [answer('q1', T0)] }, {}, { full: true });
+  assert.ok(cloud.docs.has('main'), 'the first real answer creates the documents');
+});

@@ -1,7 +1,7 @@
 {
   "name": "sat-prep",
   "version": "1.0.0",
-  "description": "Adaptive SAT study app: placement testing, targeted practice, timed digital-SAT-style practice tests, mistake review with spaced repetition, and a study dashboard.",
+  "description": "Adaptive SAT, PSAT and ACT study app: placement testing, targeted practice, timed practice tests in each test's format, mistake review with spaced repetition, a study dashboard and cloud sync.",
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",

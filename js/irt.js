@@ -41,9 +41,12 @@ export function nearestLabel(b) {
     Math.abs(value - b) < Math.abs(DIFFICULTY_B[best] - b) ? label : best, 'Medium');
 }
 
-// Rough section-score projection (200–800). This is a heuristic mapping, not College Board's scoring:
-// real scores depend on item parameters College Board does not publish. Always show it as a range.
-export function projectSectionScore({ theta, se }) {
-  const toScore = t => Math.min(800, Math.max(200, Math.round((500 + 110 * t) / 10) * 10));
+// A test's section score scale. `center` and `spread` place an average student (theta 0) and one logit on it.
+export const SAT_SCALE = { min: 200, max: 800, center: 500, spread: 110, step: 10 };
+
+// Rough section-score projection on a test's scale (SAT 200–800 by default). This is a heuristic mapping, not
+// College Board's or ACT's scoring: real scores depend on item parameters they don't publish. Always show a range.
+export function projectSectionScore({ theta, se }, scale = SAT_SCALE) {
+  const toScore = t => Math.min(scale.max, Math.max(scale.min, Math.round((scale.center + scale.spread * t) / scale.step) * scale.step));
   return { low: toScore(theta - se), mid: toScore(theta), high: toScore(theta + se) };
 }

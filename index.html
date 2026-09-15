@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1F242B">
-  <title>SAT Prep</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231F242B'/%3E%3Cpath d='M17 18h30v9H36.5v21h-9V27H17z' fill='%23F2B01E'/%3E%3C/svg%3E">
+  <title>Test Prep</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Source+Sans+3:wght@400;600;700&display=swap">
@@ -17,13 +18,15 @@
       "./js/adaptive.js": "./js/adaptive.js?v=__VERSION__",
       "./js/calc.js": "./js/calc.js?v=__VERSION__",
       "./js/demo-questions.js": "./js/demo-questions.js?v=__VERSION__",
+      "./js/exams.js": "./js/exams.js?v=__VERSION__",
       "./js/firebase-config.js": "./js/firebase-config.js?v=__VERSION__",
       "./js/irt.js": "./js/irt.js?v=__VERSION__",
       "./js/srs.js": "./js/srs.js?v=__VERSION__",
       "./js/store.js": "./js/store.js?v=__VERSION__",
       "./js/sync.js": "./js/sync.js?v=__VERSION__",
       "./js/sync-core.js": "./js/sync-core.js?v=__VERSION__",
-      "./js/taxonomy.js": "./js/taxonomy.js?v=__VERSION__"
+      "./js/taxonomy.js": "./js/taxonomy.js?v=__VERSION__",
+      "./js/taxonomy-act.js": "./js/taxonomy-act.js?v=__VERSION__"
     }
   }
   </script>
@@ -43,7 +46,7 @@
   <div class="shell">
     <aside class="side" id="side"></aside>
     <header class="topbar" id="topbar"></header>
-    <main id="view" data-loading><p class="muted">Loading…</p></main>
+    <main id="view" data-loading><div class="skeleton" role="status"><span class="visually-hidden">Loading…</span><div class="sk sk-title"></div><div class="sk sk-card"></div><div class="sk-row"><div class="sk sk-tile"></div><div class="sk sk-tile"></div><div class="sk sk-tile"></div></div></div></main>
   </div>
   <nav class="tabs" id="tabs" aria-label="Main"></nav>
   <div class="sheet" id="more" hidden></div>

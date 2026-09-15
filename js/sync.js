@@ -1,10 +1,13 @@
-// Cloud sync: sign in with Google, or with a username and passcode, and progress follows the student
-// across devices automatically. Uses Firebase Authentication and Cloud Firestore on Firebase's free Spark
-// plan. Nothing loads until js/firebase-config.js is filled in; until then the app stays local-only.
+// Cloud sync: sign in with Google, or with a username and passcode, and progress for every test (SAT, PSAT/NMSQT,
+// PSAT 8/9, ACT) follows the student across devices automatically. Uses Firebase Authentication and Cloud Firestore
+// on Firebase's free Spark plan. Nothing loads until js/firebase-config.js is filled in.
 //
-// While signed in: local changes upload shortly after they're saved (and right away when the tab is hidden
-// or closed), a live Firestore listener brings in changes from other devices as they happen, and a failed
-// sync retries on its own.
+// While signed in: local changes upload shortly after they're saved (and right away when the tab is hidden or
+// closed), live Firestore listeners bring in changes from other devices as they happen, and a failed sync retries
+// on its own.
+//
+// Cloud layout per user: the SAT stays where it was before other tests existed (users/{uid} and
+// users/{uid}/responses); every other test lives under users/{uid}/exams/{exam}.
 
 import { FIREBASE_CONFIG } from './firebase-config.js';
 import { mergeProgress, progressFromDocs, syncProgress } from './sync-core.js';
@@ -20,10 +23,11 @@ const STALE_MS = 5 * 60 * 1000;
 export const syncConfigured = Boolean(FIREBASE_CONFIG);
 
 let fb = null;
-let hooks = null;   // { getProgress, setProgress, onChange }
+let hooks = null;   // { exams, getProgress(exam), setProgress(exam, progress), onChange }
 let user = null;
-let known = {};
+let known = {};     // exam → what syncProgress remembers about that test's cloud documents
 let pushTimer = null;
+let pendingExams = new Set();
 let retryTimer = null;
 let running = null;
 let rerun = null;
@@ -60,6 +64,7 @@ export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
     clearTimeout(pushTimer);
     clearTimeout(retryTimer);
     pushTimer = null;
+    pendingExams = new Set();
     user = signedIn;
     known = {};
     update({ phase: signedIn ? 'syncing' : 'signed-out', message: null, lastSynced: null });
@@ -67,12 +72,8 @@ export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
   });
   globalThis.document?.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      // Upload a pending change before the tab is put away or closed.
-      if (pushTimer) {
-        clearTimeout(pushTimer);
-        pushTimer = null;
-        syncNow();
-      }
+      // Upload pending changes before the tab is put away or closed.
+      if (pushTimer) flushPush();
     } else if (state.phase === 'error' || Date.now() - (state.lastSynced || 0) > STALE_MS) {
       syncNow({ full: true });
     }
@@ -80,24 +81,30 @@ export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
   globalThis.window?.addEventListener('online', () => syncNow({ full: true }));
 }
 
-// Called after every local save; changes upload shortly afterwards, batched.
-export function schedulePush() {
+// Called after every local save of a test's progress; changes upload shortly afterwards, batched.
+export function schedulePush(exam) {
   if (!user) return;
+  pendingExams.add(exam);
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    pushTimer = null;
-    syncNow();
-  }, PUSH_DELAY_MS);
+  pushTimer = setTimeout(flushPush, PUSH_DELAY_MS);
 }
 
-// One sync runs at a time; a request made while one is running waits for it, then runs once more.
-export function syncNow({ full = false } = {}) {
+function flushPush() {
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  const exams = [...pendingExams];
+  pendingExams = new Set();
+  if (exams.length) syncNow({ exams });
+}
+
+// One sync runs at a time; requests made while one is running are combined and run once it finishes.
+export function syncNow({ full = false, exams = hooks?.exams ?? [] } = {}) {
   if (!user || !fb) return Promise.resolve();
   if (running) {
-    rerun = { full: full || Boolean(rerun?.full) };
+    rerun = { full: full || Boolean(rerun?.full), exams: [...new Set([...(rerun?.exams ?? []), ...exams])] };
     return running;
   }
-  running = runSync(full).finally(() => {
+  running = runSync(full, exams).finally(() => {
     running = null;
     if (rerun) {
       const next = rerun;
@@ -108,15 +115,18 @@ export function syncNow({ full = false } = {}) {
   return running;
 }
 
-async function runSync(full) {
+async function runSync(full, exams) {
   const uid = user.uid;
   clearTimeout(retryTimer);
   update({ phase: 'syncing', message: null });
   try {
-    const merged = await syncProgress(cloudFor(uid), hooks.getProgress(), known, { full });
-    if (user?.uid !== uid) return;
-    // Merge with the local copy once more: the student may have answered something while this ran.
-    hooks.setProgress(mergeProgress(hooks.getProgress(), merged));
+    for (const exam of exams) {
+      known[exam] ||= {};
+      const merged = await syncProgress(cloudFor(uid, exam), hooks.getProgress(exam), known[exam], { full });
+      if (user?.uid !== uid) return;
+      // Merge with the local copy once more: the student may have answered something while this ran.
+      hooks.setProgress(exam, mergeProgress(hooks.getProgress(exam), merged));
+    }
     update({ phase: 'synced', lastSynced: Date.now() });
     if (!stopListening) listen(uid);
   } catch (err) {
@@ -127,22 +137,11 @@ async function runSync(full) {
   }
 }
 
-// Live updates from other devices. Writes this device makes come back through here too; merging them
-// changes nothing, so they're ignored.
+// Live updates from other devices. Writes this device makes come back through here too; merging them changes
+// nothing, so they're ignored.
 function listen(uid) {
-  const { collection, doc, onSnapshot } = fb.firestore;
-  const apply = changes => {
-    if (user?.uid !== uid) return;
-    known.docs ||= new Map();
-    for (const [path, json] of changes) known.docs.set(path, json);
-    const before = JSON.stringify(hooks.getProgress());
-    hooks.setProgress(mergeProgress(hooks.getProgress(), progressFromDocs(known.docs)));
-    if (JSON.stringify(hooks.getProgress()) !== before || state.phase !== 'synced') {
-      update({ phase: 'synced', lastSynced: Date.now(), message: null });
-    } else {
-      state.lastSynced = Date.now();
-    }
-  };
+  const { onSnapshot } = fb.firestore;
+  const unsubscribers = [];
   const failed = err => {
     stopListening?.();
     if (user?.uid !== uid) return;
@@ -150,22 +149,48 @@ function listen(uid) {
     clearTimeout(retryTimer);
     retryTimer = setTimeout(() => syncNow({ full: true }), RETRY_MS);
   };
-  const offMain = onSnapshot(doc(fb.db, 'users', uid), snap => apply([['main', snap.data()?.json ?? null]]), failed);
-  const offChunks = onSnapshot(collection(fb.db, 'users', uid, 'responses'),
-    snap => apply(snap.docChanges().map(c => [c.doc.id, c.type === 'removed' ? null : c.doc.data().json])), failed);
+  for (const exam of hooks.exams) {
+    const { mainRef, chunksRef } = refsFor(uid, exam);
+    const apply = changes => {
+      if (user?.uid !== uid) return;
+      known[exam] ||= {};
+      known[exam].docs ||= new Map();
+      for (const [path, json] of changes) known[exam].docs.set(path, json);
+      const before = JSON.stringify(hooks.getProgress(exam));
+      hooks.setProgress(exam, mergeProgress(hooks.getProgress(exam), progressFromDocs(known[exam].docs)));
+      if (JSON.stringify(hooks.getProgress(exam)) !== before || state.phase !== 'synced') {
+        update({ phase: 'synced', lastSynced: Date.now(), message: null });
+      } else {
+        state.lastSynced = Date.now();
+      }
+    };
+    unsubscribers.push(onSnapshot(mainRef, snap => apply([['main', snap.data()?.json ?? null]]), failed));
+    unsubscribers.push(onSnapshot(chunksRef,
+      snap => apply(snap.docChanges().map(c => [c.doc.id, c.type === 'removed' ? null : c.doc.data().json])), failed));
+  }
   stopListening = () => {
-    offMain();
-    offChunks();
+    unsubscribers.forEach(stop => stop());
     stopListening = null;
   };
 }
 
-function cloudFor(uid) {
-  const { collection, doc, getDoc, getDocs, runTransaction } = fb.firestore;
-  const ref = path => (path === 'main' ? doc(fb.db, 'users', uid) : doc(fb.db, 'users', uid, 'responses', path));
+function refsFor(uid, exam) {
+  const { collection, doc } = fb.firestore;
+  const base = exam === 'sat' ? ['users', uid] : ['users', uid, 'exams', exam];
+  return {
+    mainRef: doc(fb.db, ...base),
+    chunksRef: collection(fb.db, ...base, 'responses'),
+    chunkRef: period => doc(fb.db, ...base, 'responses', period),
+  };
+}
+
+function cloudFor(uid, exam) {
+  const { getDoc, getDocs, runTransaction } = fb.firestore;
+  const { mainRef, chunksRef, chunkRef } = refsFor(uid, exam);
+  const ref = path => (path === 'main' ? mainRef : chunkRef(path));
   return {
     async readAll() {
-      const [main, chunks] = await Promise.all([getDoc(ref('main')), getDocs(collection(fb.db, 'users', uid, 'responses'))]);
+      const [main, chunks] = await Promise.all([getDoc(mainRef), getDocs(chunksRef)]);
       return { main: main.data()?.json ?? null, chunks: Object.fromEntries(chunks.docs.map(d => [d.id, d.data().json])) };
     },
     transact: fn => runTransaction(fb.db, tx => fn({
@@ -195,11 +220,7 @@ export async function signInWithUsername(username, passcode, { create = false } 
 
 export async function signOutOfSync() {
   // Upload anything still waiting before the account is disconnected.
-  if (pushTimer) {
-    clearTimeout(pushTimer);
-    pushTimer = null;
-    syncNow();
-  }
+  if (pushTimer) flushPush();
   await running;
   await fb.auth.signOut(fb.authInstance);
 }

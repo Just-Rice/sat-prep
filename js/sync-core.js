@@ -12,7 +12,7 @@
 //              Half-month chunks keep documents far below Firestore's 1 MiB limit, and a new answer only
 //              rewrites the current chunk.
 
-import { defaultProgress } from './store.js';
+import { defaultProgress, isPristine } from './store.js';
 
 const SETTINGS = ['profile', 'placement', 'plan'];
 
@@ -105,6 +105,10 @@ export async function syncProgress(backend, local, known, { full = false } = {})
     }
     const remoteChunks = Object.fromEntries([...remote].filter(([path, json]) => path !== 'main' && json != null));
     const merged = mergeProgress(local, fromCloud(remote.get('main'), remoteChunks));
+    // A test nobody has used on any device stays out of the cloud entirely.
+    if (remote.get('main') == null && !Object.keys(remoteChunks).length && isPristine(merged)) {
+      return { merged, remote, written: new Map() };
+    }
 
     const next = toCloud(merged);
     const written = new Map();

@@ -1,4 +1,6 @@
-// Question selection: the placement test, targeted practice, and timed practice-test assembly.
+// Question selection: the placement test, targeted practice, and timed practice-test assembly. Everything that
+// differs between tests (sections, skills, domain shares, grade priors) comes from the exam in exams.js; the SAT
+// is the default.
 //
 // Question shape (see scripts/build-questions.js and demo-questions.js):
 //   { id, section: 'RW'|'MATH', domain, skill, difficulty: 'Easy'|'Medium'|'Hard', source: 'cb-export' | 'demo',
@@ -9,39 +11,31 @@
 // Text fields are plain text; the UI escapes them. Images are { src, width, height }.
 
 import { DIFFICULTY_B, estimateAbility, targetDifficulty } from './irt.js';
-import { GRADE_PRIOR, skillsForGrade, skillsForSection } from './taxonomy.js';
+import { EXAMS, skillsForGradeOf, skillsOf } from './exams.js';
 
 export const PLACEMENT = { minItems: 12, maxItems: 22, targetSe: 0.45 };
 
-export const TEST_FORMAT = {
-  RW: { perModule: 27, minutes: 32 },
-  MATH: { perModule: 22, minutes: 35 },
-};
-
-// Approximate share of each domain per module, from College Board's test specifications.
-const DOMAIN_SHARE = {
-  RW: { 'Craft and Structure': 0.28, 'Information and Ideas': 0.26, 'Standard English Conventions': 0.26, 'Expression of Ideas': 0.2 },
-  MATH: { Algebra: 0.35, 'Advanced Math': 0.35, 'Problem-Solving and Data Analysis': 0.15, 'Geometry and Trigonometry': 0.15 },
-};
+// The SAT's module format, keyed by section.
+export const TEST_FORMAT = Object.fromEntries(EXAMS.sat.sections.map(s => [s.id, s]));
 
 const b = q => DIFFICULTY_B[q.difficulty] ?? 0;
 
-export function prior(progress, section) {
-  const placed = progress.placement[section];
+export function prior(progress, section, exam = EXAMS.sat) {
+  const placed = progress.placement?.[section];
   if (placed) return { mean: placed.theta, sd: Math.max(placed.se, 0.5) };
-  if (progress.profile.grade) return { mean: GRADE_PRIOR[progress.profile.grade], sd: 1 };
+  if (progress.profile.grade) return { mean: exam.gradePrior[progress.profile.grade] ?? 0, sd: 1 };
   return { mean: 0, sd: 1 };
 }
 
-export function sectionAbility(progress, section) {
+export function sectionAbility(progress, section, exam = EXAMS.sat) {
   // Placement results are already folded into the prior, so only later responses update it.
   const rs = progress.responses.filter(r => r.section === section && r.source !== 'placement');
-  return estimateAbility(rs, prior(progress, section));
+  return estimateAbility(rs, prior(progress, section, exam));
 }
 
-export function skillAbilities(progress, section) {
-  const overall = sectionAbility(progress, section);
-  return skillsForSection(section).map(skill => {
+export function skillAbilities(progress, section, exam = EXAMS.sat) {
+  const overall = sectionAbility(progress, section, exam);
+  return skillsOf(exam, section).map(skill => {
     const rs = progress.responses.filter(r => r.section === section && r.skill === skill.name);
     const est = estimateAbility(rs, { mean: overall.theta, sd: 0.8 });
     return { ...skill, ...est, answered: rs.length, correct: rs.filter(r => r.correct).length };
@@ -70,11 +64,11 @@ export function nextPlacementQuestion(pool, answered, section) {
 
 // ---- Practice ----
 
-export function nextPracticeQuestion(pool, progress, section, { skill } = {}) {
-  const grade = progress.profile.mode === 'grade' && !progress.placement[section] ? progress.profile.grade : null;
-  const allowed = new Set((grade ? skillsForGrade(section, grade) : skillsForSection(section)).map(s => s.name));
+export function nextPracticeQuestion(pool, progress, section, { skill, exam = EXAMS.sat } = {}) {
+  const grade = progress.profile.mode === 'grade' && !progress.placement?.[section] ? progress.profile.grade : null;
+  const allowed = new Set((grade ? skillsForGradeOf(exam, section, grade) : skillsOf(exam, section)).map(s => s.name));
   if (skill) allowed.add(skill); // a skill the student picks themselves is served regardless of grade
-  const abilities = skillAbilities(progress, section).filter(s => allowed.has(s.name));
+  const abilities = skillAbilities(progress, section, exam).filter(s => allowed.has(s.name));
 
   const lastSeen = new Map(progress.responses.map(r => [r.qid, r.at]));
   const available = pool.filter(q => q.section === section && allowed.has(q.skill));
@@ -87,7 +81,7 @@ export function nextPracticeQuestion(pool, progress, section, { skill } = {}) {
     const weights = withQuestions.map(s => Math.exp(-s.theta) * (s.answered < 3 ? 2 : 1));
     skillName = weightedPick(withQuestions, weights)?.name;
   }
-  const est = abilities.find(s => s.name === skillName) || sectionAbility(progress, section);
+  const est = abilities.find(s => s.name === skillName) || sectionAbility(progress, section, exam);
   const inSkill = available.filter(q => q.skill === skillName);
   const unseen = inSkill.filter(q => !lastSeen.has(q.id));
   const choices = unseen.length ? unseen : [...inSkill].sort((a, c) => lastSeen.get(a.id) - lastSeen.get(c.id)).slice(0, Math.ceil(inSkill.length / 2));
@@ -97,15 +91,17 @@ export function nextPracticeQuestion(pool, progress, section, { skill } = {}) {
 // ---- Timed practice tests ----
 
 // Module 1 mixes difficulties; module 2 is harder or easier depending on module 1. College Board does
-// not publish its routing rule, so the threshold here is an approximation.
+// not publish its routing rule, so the threshold here is an approximation. Tests that aren't adaptive (the ACT)
+// use one module per section with the mixed difficulty.
 export const ROUTING_THRESHOLD = 0.6;
 
-export function buildModule(pool, section, route, exclude = new Set(), size = TEST_FORMAT[section].perModule) {
+export function buildModule(pool, section, route, exclude = new Set(), size = TEST_FORMAT[section]?.perModule, exam = EXAMS.sat) {
+  const shares = exam.domainShare[section];
   const mix = route === 'hard' ? { Easy: 0.15, Medium: 0.4, Hard: 0.45 }
     : route === 'easy' ? { Easy: 0.45, Medium: 0.4, Hard: 0.15 }
     : { Easy: 0.33, Medium: 0.34, Hard: 0.33 };
   const picked = [];
-  for (const [domain, share] of Object.entries(DOMAIN_SHARE[section])) {
+  for (const [domain, share] of Object.entries(shares)) {
     const want = Math.round(share * size);
     const inDomain = shuffle(pool.filter(q => q.section === section && q.domain === domain && !exclude.has(q.id)));
     for (const [difficulty, frac] of Object.entries(mix)) {
@@ -117,7 +113,8 @@ export function buildModule(pool, section, route, exclude = new Set(), size = TE
   const rest = shuffle(pool.filter(q => q.section === section && !exclude.has(q.id) && !used.has(q.id)));
   const module = [...picked, ...rest].slice(0, size);
   // Order roughly easy to hard within each domain block, like the real test.
-  return module.sort((a, c) => domainOrder(section, a) - domainOrder(section, c) || b(a) - b(c));
+  const order = q => Object.keys(shares).indexOf(q.domain);
+  return module.sort((a, c) => order(a) - order(c) || b(a) - b(c));
 }
 
 export function routeFor(module1Responses) {
@@ -140,10 +137,6 @@ function toNumber(text) {
   const frac = s.match(/^(-?\d+)\s*\/\s*(\d+)$/);
   if (frac) return Number(frac[2]) === 0 ? null : Number(frac[1]) / Number(frac[2]);
   return /^-?(\d+\.?\d*|\.\d+)$/.test(s) ? Number(s) : null;
-}
-
-function domainOrder(section, q) {
-  return Object.keys(DOMAIN_SHARE[section]).indexOf(q.domain);
 }
 
 function closestTo(list, targetB) {
