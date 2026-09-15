@@ -88,46 +88,46 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 .shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; transition: grid-template-columns 0.18s ease; }
 .shell.collapsed { grid-template-columns: 68px minmax(0, 1fr); }
 .side {
-  position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto;
+  position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 22px; padding: 22px 14px 16px;
   background: var(--side); color: var(--side-ink);
 }
 .side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.brand { font: 800 20px/1 var(--display); letter-spacing: -0.01em; color: var(--side-strong); text-decoration: none; padding: 4px 10px; white-space: nowrap; }
+.brand { min-width: 0; overflow: hidden; font: 800 20px/1 var(--display); letter-spacing: -0.01em; color: var(--side-strong); text-decoration: none; padding: 4px 10px; white-space: nowrap; }
 .collapse { flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--side-muted); }
 .collapse:hover:not(:disabled) { background: var(--side-raise); color: var(--side-strong); }
 .collapse .icon { width: 18px; height: 18px; transition: transform 0.18s ease; }
 .side-nav { display: grid; gap: 2px; }
-.side-nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); text-decoration: none; }
+.side-nav a { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); text-decoration: none; white-space: nowrap; }
 .side-nav a:hover { background: var(--side-raise); color: var(--side-strong); }
 .side-nav .icon { width: 19px; height: 19px; color: var(--side-muted); }
 .side-nav a:hover .icon, .side-nav a.on .icon { color: var(--side-strong); }
 .side-nav a.on { background: rgb(255 255 255 / 0.09); color: var(--side-strong); box-shadow: inset 3px 0 0 var(--accent); }
 .badge { margin-left: auto; background: var(--accent); color: #1A1F25; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1; padding: 3px 7px; }
 .badge.live { font-size: 0; width: 9px; height: 9px; padding: 0; flex: none; }
-.goal { margin-top: auto; display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; background: var(--side-raise); }
-.goal strong { display: block; color: var(--side-strong); font-weight: 600; }
-.goal span { font-size: 13px; color: var(--side-muted); }
-.ring { flex: none; }
-.ring circle { fill: none; stroke-width: 5; }
-.ring-track { stroke: rgb(255 255 255 / 0.13); }
-.ring-fill { stroke: var(--accent); stroke-linecap: round; }
-.sync { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); font-size: 14px; text-decoration: none; }
+.streak { margin-top: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.streak-count { flex: none; display: grid; place-items: center; min-width: 40px; height: 40px; padding: 0 6px; border-radius: 10px; background: var(--side-raise); color: var(--side-muted); font: 800 17px/1 var(--display); font-variant-numeric: tabular-nums; }
+.streak.on .streak-count { background: var(--accent); color: #1A1F25; }
+.streak .label { display: grid; gap: 1px; min-width: 0; flex: 1; white-space: nowrap; }
+.streak strong { color: var(--side-strong); font-weight: 600; font-size: 15px; }
+.streak .label > span { font-size: 13px; color: var(--side-muted); }
+.goal-bar { display: block; height: 4px; margin-top: 5px; border-radius: 999px; background: rgb(255 255 255 / 0.12); overflow: hidden; }
+.goal-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.sync { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); font-size: 14px; text-decoration: none; white-space: nowrap; }
 .sync:hover, .sync.on { background: var(--side-raise); color: var(--side-strong); }
-.sync small { display: block; color: var(--side-muted); font-size: 12px; overflow-wrap: anywhere; }
+.sync .label { min-width: 0; }
+.sync small { display: block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; color: var(--side-muted); font-size: 12px; }
 .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--side-muted); }
 .dot.ok { background: var(--good); }
 .dot.bad { background: var(--low); }
 
-.shell.collapsed .side { padding-inline: 10px; }
-.shell.collapsed .brand, .shell.collapsed .side .label { display: none; }
-.shell.collapsed .side-head { justify-content: center; }
+/* Collapsing only narrows the column and fades the text. Icons, links and the streak count keep their size and
+   position in both states, so nothing jumps or rewraps while the width animates. */
+.side .label, .side .brand { transition: opacity 0.12s ease 0.1s, visibility 0s linear 0s; }
+.shell.collapsed .side .label, .shell.collapsed .side .brand { opacity: 0; visibility: hidden; transition: opacity 0.1s ease, visibility 0s linear 0.1s; }
 .shell.collapsed .collapse .icon { transform: rotate(180deg); }
-.shell.collapsed .side-nav a { position: relative; justify-content: center; padding: 10px 0; }
-.shell.collapsed .side-nav .badge { position: absolute; top: 2px; right: 3px; margin: 0; font-size: 10.5px; padding: 2px 5px; }
-.shell.collapsed .side-nav .badge.live { font-size: 0; width: 9px; height: 9px; padding: 0; top: 6px; right: 9px; }
-.shell.collapsed .goal { justify-content: center; padding: 6px 0; background: none; }
-.shell.collapsed .sync { justify-content: center; padding: 10px 0; }
+.shell.collapsed .side-nav .badge { position: absolute; top: 2px; left: 20px; margin: 0; font-size: 10.5px; padding: 2px 5px; }
+.shell.collapsed .side-nav .badge.live { font-size: 0; width: 9px; height: 9px; padding: 0; top: 6px; left: 26px; }
 
 .topbar, .tabs, .sheet { display: none; }
 
@@ -149,7 +149,10 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
     height: 56px; padding: 0 8px 0 max(16px, env(safe-area-inset-left)); background: var(--side); color: var(--side-ink);
   }
   .topbar .brand { font-size: 18px; padding: 0; margin-right: auto; }
-  .top-goal { display: flex; align-items: center; gap: 6px; padding: 8px; color: var(--side-strong); font-weight: 600; font-size: 15px; text-decoration: none; font-variant-numeric: tabular-nums; }
+  .top-streak { display: flex; align-items: center; gap: 4px; padding: 8px 10px; color: var(--side-muted); font-weight: 700; font-size: 16px; text-decoration: none; font-variant-numeric: tabular-nums; }
+  .top-streak .icon { width: 20px; height: 20px; }
+  .top-streak.on { color: var(--side-strong); }
+  .top-streak.on .icon { color: var(--accent); fill: color-mix(in srgb, var(--accent) 35%, transparent); }
   .top-sync { display: grid; place-items: center; width: 40px; height: 40px; }
   .tabs {
     display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
@@ -239,9 +242,13 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 h2 + .domain-label { margin-top: 4px; }
 
 @media (max-width: 820px) {
-  .today-mobile { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 15px; }
-  .today-mobile strong { color: var(--ink); }
-  .today-mobile .ring-track { stroke: var(--surface-2); }
+  .today-mobile { display: block; }
+  .today-mobile .streak { max-width: 360px; }
+  .today-mobile .streak-count { background: var(--surface-2); color: var(--muted); }
+  .today-mobile .streak.on .streak-count { background: var(--accent); color: #1A1F25; }
+  .today-mobile .streak strong { color: var(--ink); }
+  .today-mobile .streak .label > span { color: var(--muted); }
+  .today-mobile .goal-bar { background: var(--surface-2); }
 }
 @container (max-width: 760px) {
   .scores { grid-template-columns: 1fr 1fr; }

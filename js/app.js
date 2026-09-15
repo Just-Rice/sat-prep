@@ -44,7 +44,6 @@ const save = () => { store.saveProgress(progress); schedulePush(); };
 const touch = (...keys) => { for (const key of keys) progress.stamps = { ...progress.stamps, [key]: Date.now() }; };
 const dayKey = t => new Date(t).toLocaleDateString('en-CA');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const streakText = n => (n ? `${n}-day streak` : 'no streak yet');
 
 function go(path) {
   if (location.hash === `#/${path}`) render();
@@ -165,16 +164,21 @@ const ICONS = {
   library: '<path d="M4 5h4v14H4zM9.5 5h4v14h-4z"/><path d="m15.2 5.8 3.4-.9 2.9 13.4-3.4.9z"/>',
   resources: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   chevron: '<path d="m14.5 6-6 6 6 6"/>',
+  flame: '<path d="M12 21c-3.9 0-7-2.8-7-6.6 0-2.9 1.9-5 3.6-6.8.6 2 1.8 3 3 3.4-.5-3.1.9-6 3.4-8 .4 3 2 4.6 3.3 6.3 1 1.4 1.7 3 1.7 5.1 0 3.8-3.1 6.6-7 6.6z"/>',
   more: '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
 };
 const icon = name => `<svg class="icon icon-${name}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
-// Today's progress toward the daily goal, drawn as a ring.
-function ring(value, max, size = 46) {
-  const circumference = 2 * Math.PI * 19;
-  const done = Math.min(1, value / Math.max(1, max));
-  const fill = done ? `<circle class="ring-fill" cx="24" cy="24" r="19" stroke-dasharray="${(done * circumference).toFixed(1)} ${circumference.toFixed(1)}" transform="rotate(-90 24 24)"/>` : '';
-  return `<svg class="ring" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true"><circle class="ring-track" cx="24" cy="24" r="19"/>${fill}</svg>`;
+// The streak counts every day in a row with at least one answered question, with no upper limit. Progress
+// toward today's question goal sits underneath it as a small bar.
+function streakWidget(streak, today, goal, withTooltip = false) {
+  const title = streak ? `${streak}-day streak` : 'No streak yet';
+  const label = `${title}. ${today} of ${goal} questions today.`;
+  const done = Math.min(100, Math.round((today / Math.max(1, goal)) * 100));
+  return `<div class="streak${streak ? ' on' : ''}" role="img" aria-label="${label}"${withTooltip ? ` title="${label}"` : ''}>
+      <span class="streak-count">${streak}</span>
+      <span class="label"><strong>${title}</strong><span>${today >= goal ? `Goal met · ${today} today` : `${today} of ${goal} today`}</span><i class="goal-bar"><i style="width:${done}%"></i></i></span>
+    </div>`;
 }
 
 // The sidebar on wide screens; a top bar, bottom tabs and a "More" sheet on phones.
@@ -195,7 +199,7 @@ function renderNav(active) {
   const collapsed = shell.classList.contains('collapsed');
   const tip = text => (collapsed ? ` title="${esc(text)}"` : '');
   const toggleLabel = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  const goalText = `${today} of ${goal} questions today`;
+  const streak = streakDays();
   side.innerHTML = `
     <div class="side-head">
       <a class="brand" href="#/home">SAT Prep</a>
@@ -205,12 +209,12 @@ function renderNav(active) {
       const name = r === 'review' && due ? `${label}, ${due} due` : r === 'test' && testRunning ? `${label}, in progress` : label;
       return `<a href="#/${r}"${current(r)} aria-label="${name}"${tip(name)}>${icon(r)}<span class="label">${label}</span>${badge(r)}</a>`;
     }).join('')}</nav>
-    <div class="goal" role="img" aria-label="${goalText}"${tip(goalText)}>${ring(today, goal)}<div class="label"><strong>${today} of ${goal}</strong><span>today · ${streakText(streakDays())}</span></div></div>
-    ${sync ? `<a class="sync${active === 'account' ? ' on' : ''}" href="#/account" aria-label="${syncText}${sync.account ? `: ${esc(sync.account)}` : ''}"${tip(syncText)}><i class="dot ${syncDot}"></i><span class="label">${syncText}${sync.account ? `<small>${esc(sync.account)}</small>` : ''}</span></a>` : ''}`;
+    ${streakWidget(streak, today, goal, collapsed)}
+    ${sync ? `<a class="sync${active === 'account' ? ' on' : ''}" href="#/account" aria-label="${syncText}${sync.account ? `: ${esc(sync.account)}` : ''}"${tip(syncText)}><i class="dot ${syncDot}"></i><span class="label">${syncText}${sync.account ? `<small title="${esc(sync.account)}">${esc(sync.account)}</small>` : ''}</span></a>` : ''}`;
 
   topbar.innerHTML = `
     <a class="brand" href="#/home">SAT Prep</a>
-    <a class="top-goal" href="#/home" aria-label="${today} of ${goal} questions today">${ring(today, goal, 28)}<span>${today}/${goal}</span></a>
+    <a class="top-streak${streak ? ' on' : ''}" href="#/home" aria-label="${streak ? `${streak}-day streak` : 'No streak yet'}, ${today} of ${goal} questions today">${icon('flame')}<span>${streak}</span></a>
     ${sync ? `<a class="top-sync" href="#/account" aria-label="${syncText}"><i class="dot ${syncDot}"></i></a>` : ''}`;
 
   const tabLinks = [['home', 'Home'], ['practice', 'Practice'], ['test', 'Test'], ['review', 'Review']];
@@ -968,7 +972,7 @@ function viewHome() {
       <p class="eyebrow">${eyebrow}</p>
       <h1>Dashboard</h1>
     </header>
-    <p class="today-mobile">${ring(today, goal, 36)}<span><strong>${today} of ${goal}</strong> today · ${streakText(streakDays())}</span></p>
+    <div class="today-mobile">${streakWidget(streakDays(), today, goal)}</div>
     <section class="next">
       <div>
         <p class="eyebrow">Up next</p>
